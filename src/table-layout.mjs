@@ -41,6 +41,15 @@ export function cellDisplayText(table, row, col) {
   return text.join('\n');
 }
 
+export function cellDisplayMarks(table,row,col){
+  const merge=cellMerge(table,row,col)||{row,col,rowspan:1,colspan:1};const marks=[];let offset=0;
+  for(let r=merge.row;r<merge.row+merge.rowspan;r++)for(let c=merge.col;c<merge.col+merge.colspan;c++){
+    const text=table.rows[r][c];if(!text)continue;
+    for(const m of table.cellMarks?.find(x=>x.row===r&&x.col===c)?.marks||[])marks.push({...m,start:m.start+offset,end:m.end+offset});offset+=text.length+1;
+  }
+  return marks;
+}
+
 /** Half-open row groups. No legal page boundary cuts a vertical merge. */
 export function tableRowGroups(table) {
   const clean = validateTable(table), joined = new Set();
@@ -107,5 +116,6 @@ export function resizeTable(table,axis,index,remove=false) {
   const merges=clean.merges.map(m=>{const next={...m};if(remove){if(index<m[pos])next[pos]--;else if(index<m[pos]+m[span])next[span]--;}else {if(index<=m[pos])next[pos]++;else if(index<m[pos]+m[span])next[span]++;}return next;}).filter(m=>m.rowspan>0&&m.colspan>0&&(m.rowspan>1||m.colspan>1));
   const columnWidths=[...clean.columnWidths];if(!isRow){if(remove)columnWidths.splice(index,1);else columnWidths.splice(index,0,100/length);}
   let headerRows=table.headerRows??1;if(isRow&&index<headerRows)headerRows+=remove?-1:1;
-  return {...table,...validateTable({rows,merges,columnWidths}),headerRows:Math.min(rows.length,headerRows)};
+  const cellMarks=(table.cellMarks||[]).filter(c=>!remove||c[pos]!==index).map(c=>({...c,[pos]:c[pos]+(remove?(c[pos]>index?-1:0):(c[pos]>=index?1:0))}));
+  return {...table,...validateTable({rows,merges,columnWidths}),...(table.cellMarks?{cellMarks}:{}),headerRows:Math.min(rows.length,headerRows)};
 }

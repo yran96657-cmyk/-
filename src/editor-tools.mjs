@@ -25,7 +25,7 @@ export function findMatches(doc, needle, options = {}) {
   const re = new RegExp(escaped, options.caseSensitive ? 'gu' : 'giu');
   const matches = [];
   for (const field of fields(doc, options.scope)) {
-    const protectedRanges = [...field.text.matchAll(/\[\^[^\]\r\n]*\]/g)].map(m => [m.index, m.index + m[0].length]);
+    const protectedRanges = [...field.text.matchAll(/\[\^[^\]\r\n]*\]|\[\[(?:math|ref|cite):[-\w]+\]\]/g)].map(m => [m.index, m.index + m[0].length]);
     let protectedIndex = 0;
     for (const hit of field.text.matchAll(re)) {
       const start = hit.index, end = start + hit[0].length;

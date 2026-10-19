@@ -45,7 +45,8 @@ def preflight(reader,min_dpi=150):
         # New local transform a followed by existing transform b.
         return (a[0]*b[0]+a[1]*b[2],a[0]*b[1]+a[1]*b[3],a[2]*b[0]+a[3]*b[2],a[2]*b[1]+a[3]*b[3],a[4]*b[0]+a[5]*b[2]+b[4],a[4]*b[1]+a[5]*b[3]+b[5])
     def scan(stream,res,ctm,page,depth=0):
-        if stream is None or depth>12: return
+        if stream is None: return
+        if depth>12: warnings.append('图像嵌套超过扫描深度，部分 DPI 未检查。');return
         res=_resolve(res or {}); stack=[]
         for operands,op in ContentStream(stream,reader).operations:
             if op==b'q': stack.append(ctm)
@@ -139,6 +140,6 @@ def process_pdf(pdf_bytes,options=None):
             out.trimbox=RectangleObject([x,y,x+w,y+h]);out.bleedbox=RectangleObject([x-bleed,y-bleed,x+w+bleed,y+h+bleed])
             if crop:_marks(out,[(x,y,w,h)],bleed)
     stream=BytesIO();writer.write(stream);data=stream.getvalue();report=preflight(PdfReader(BytesIO(data)),_num(options.get('minDpi'),150,30,2400))
-    report.update({'sourcePages':len(reader.pages),'selectedPages':[i+1 for i in selected],'outputPages':len(writer.pages),'blankPages':blank,'imposition':imposition,'standards':{'pdfX':False,'cmyk':False}})
+    report.update({'sourcePages':len(reader.pages),'selectedPages':[i+1 for i in selected],'outputPages':len(writer.pages),'blankPages':blank,'imposition':imposition,'minDpi':_num(options.get('minDpi'),150,30,2400),'standards':{'pdfX':False,'cmyk':False}})
     report['warnings']=list(dict.fromkeys(warnings+report['warnings']+['此报告不构成 PDF/X、CMYK 或印厂认证；透明度、叠印、专色、总墨量尚未预检。']))
     return {'pdf':data,'report':report}

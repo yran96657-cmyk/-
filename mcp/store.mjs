@@ -1,6 +1,8 @@
+import {documentDiagnostics} from '../src/integrity.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {checkDocument,applyOperations,outline} from './operations.mjs';
 import {id} from './schema.mjs';
 const MAX=100*1024*1024;
@@ -17,12 +19,21 @@ export class ProjectStore {
   change(projectId,expectedRevision,fn,{dryRun=false}={}){return this.locked(projectId,file=>{
     const old=this.read(projectId);if(old.revision!==expectedRevision)throw Error(`REVISION_CONFLICT: expected ${expectedRevision}, actual ${old.revision}. Read again before retrying.`);
     const {document,createdIds=[]}=fn(checkDocument(old.document));const clean=checkDocument(document);
+    // A full replacement must not erase the evidence of an earlier lossy import.
+    for(const report of old.document.importReports||[])if(!clean.importReports.some(r=>isDeepStrictEqual(r,report)))throw Error('IMPORT_REPORT_REMOVAL: retain original import reports');
     const next={...old,document:clean,revision:old.revision+1,updatedAt:new Date().toISOString(),history:[...(old.history||[]),old.document].slice(-10)};
     if(!dryRun)this.write(file,next);
-    return {...this.summary(dryRun?old:next),dryRun,createdIds,outline:outline(clean),diagnostics:[],...(dryRun?{preview:clean}:{})};
+    return {...this.summary(dryRun?old:next),dryRun,createdIds,outline:outline(clean),diagnostics:documentDiagnostics(clean),visualPaginationChecked:false,...(dryRun?{preview:clean}:{})};
   });}
   edit(projectId,expectedRevision,operations,options){return this.change(projectId,expectedRevision,doc=>applyOperations(doc,operations),options);}
   replace(projectId,expectedRevision,document){return this.change(projectId,expectedRevision,()=>({document}));}
   undo(projectId,expectedRevision){return this.locked(projectId,file=>{const old=this.read(projectId);if(old.revision!==expectedRevision)throw Error('REVISION_CONFLICT');if(!old.history?.length)throw Error('NOTHING_TO_UNDO');const next={...old,revision:old.revision+1,updatedAt:new Date().toISOString(),document:checkDocument(old.history.at(-1)),history:old.history.slice(0,-1)};this.write(file,next);return this.summary(next);});}
+  readArtifact(name){
+    if(!/^[\w-]+\.json$/.test(name))throw Error('INVALID_ARTIFACT_NAME');
+    const dir=path.join(this.root,'artifacts');if(fs.lstatSync(dir).isSymbolicLink())throw Error('SYMLINK_NOT_ALLOWED');
+    const file=path.join(dir,name),stat=fs.lstatSync(file);
+    if(stat.isSymbolicLink()||!stat.isFile()||stat.size>MAX)throw Error('INVALID_ARTIFACT_FILE');
+    return JSON.parse(fs.readFileSync(file,'utf8'));
+  }
   artifact(name,bytes){if(!/^[\w-]+\.(json|pdf)$/.test(name))throw Error('INVALID_ARTIFACT_NAME');if(fs.lstatSync(path.join(this.root,'artifacts')).isSymbolicLink())throw Error('SYMLINK_NOT_ALLOWED');const file=path.join(this.root,'artifacts',name);fs.writeFileSync(file,bytes,{flag:'wx'});return file;}
 }

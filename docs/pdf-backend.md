@@ -1,3 +1,19 @@
+# 期刊 PDF 校样增量说明
+
+当前工作树支持 `layout.fontSet: "windows" | "mac" | "fandol"`，优先于 `SHUYE_FONTSET` 环境变量；未设置时保留 Windows 默认。字体缺失时报错，不隐式换字库。Fandol 使用 TeX 自带字体；这不是具体期刊字体许可或模板的替代证明。
+
+点击 **最终 PDF 校样** 后，PDF.js 从本机依赖渲染实际生成的 PDF，下载复用同一份字节，浏览器会核对 SHA-256。此入口需要先 `npm ci`，以及 `python -m pip install -r requirements.txt` 和 XeLaTeX。旧版的浏览器打印仍使用 DOM 排版；不能把两者页数相同当作质量保证。
+
+短表在双栏等多栏版式中默认留在栏内（最多 10 行、4 列）；`placement: "column"` 强制栏内不可拆表，`"full-width"` 强制通栏可跨页。长表仍用 longtable；跨栏浮动、自动宽度适配、超页合并格内部分页没有完成。表格脚注显示为表后注，重复正文引用保留同一编号，不再改成星号；它不等于跨页底部脚注引擎。
+
+`/api/render-proof` 和 `/api/production` 返回最终字节的哈希、字体、DPI、文字几何、导入诊断与未检查项。几何采用 PDF 字体度量框，不能检测全部遮挡、墨迹出界、内容语义或锚定关系。缺少几何依赖时返回 `NOT_CHECKED`，并保持 `INCOMPLETE`；已发现内容丢失、缺字、超宽或文字出页时为 `BLOCKED`。`productionReady` 始终为 `false`，正式发印须另行完成所列验收。
+
+JSON HTTP 请求上限统一为 100 MB，DOCX 原件上限仍为 20 MB。模型允许的工程规模不代表 XeLaTeX 和 MCP 一次能处理该规模；PDF 编译内容仍有 30 MB、单次编译 90 秒、MCP 返回 100 MB 等保护。建议按篇处理并实测峰值内存和耗时。
+
+详细执行方法与限制见 [期刊生产验收](journal-production.md)。以下为原版后端说明；其 Windows 默认仍有效，旧重复脚注与全部通栏限制以本节为准。
+
+---
+
 # 独立 PDF 出版后端与 DOCX 导入
 
 MIT 独立实现。`publishing.render_pdf(doc)` 返回 `{pdf: bytes, warnings: list[str]}`；`build_tex(doc, assets_dir)` 返回 `(tex_source, warnings)`。`docx_import.import_docx(data)` 返回 `{blocks, notes, warnings}`。

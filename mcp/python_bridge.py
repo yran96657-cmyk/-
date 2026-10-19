@@ -6,25 +6,26 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 def main():
-    request=json.loads(sys.stdin.buffer.read(30*1024*1024+1))
+    data=sys.stdin.buffer.read(100*1024*1024+1)
+    if len(data)>100*1024*1024: raise ValueError('BACKEND_REQUEST_TOO_LARGE')
+    request=json.loads(data)
     command=request['command']
     if command=='capabilities':
         import importlib.util
         import shutil
         from publishing import TEX_DEFAULT
-        return {'python':sys.version.split()[0],'xelatex':bool(shutil.which('xelatex') or TEX_DEFAULT.exists()),'pypdf':importlib.util.find_spec('pypdf') is not None,'pillow':importlib.util.find_spec('PIL') is not None,'platform':sys.platform}
+        return {'python':sys.version.split()[0],'xelatex':bool(shutil.which('xelatex') or TEX_DEFAULT.exists()),'pypdf':importlib.util.find_spec('pypdf') is not None,'pillow':importlib.util.find_spec('PIL') is not None,'pdfminer':importlib.util.find_spec('pdfminer') is not None,'platform':sys.platform}
     if command=='preflight_pdf':
         from print_production import process_pdf
-        output=process_pdf(base64.b64decode(request['data'],validate=True),request.get('options',{}))
+        from proof import inspect_output
+        output=inspect_output(process_pdf(base64.b64decode(request['data'],validate=True),request.get('options',{})))
         return {'pdf':base64.b64encode(output['pdf']).decode('ascii'),'report':output['report']}
     if command=='import_docx':
         from docx_import import import_docx
         return import_docx(base64.b64decode(request['data'],validate=True))
-    from publishing import render_pdf
-    result=render_pdf(request['document'])
-    from print_production import process_pdf
-    output=process_pdf(result['pdf'],request.get('options',{}))
-    output['report']['layoutWarnings']=result['warnings']
+    if command!='export_pdf': raise ValueError('Unsupported backend command: '+str(command))
+    from proof import render_proof
+    output=render_proof(request['document'],request.get('options',{}))
     return {'pdf':base64.b64encode(output['pdf']).decode('ascii'),'report':output['report']}
 
 if __name__=='__main__':

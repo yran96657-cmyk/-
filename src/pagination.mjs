@@ -1,5 +1,6 @@
+import {mathTokens} from './integrity.mjs';
 import { needsFlow, paginateFlow, applyFlowPart, safeFlowCut, minimumFlowUnit } from './flow-layout.mjs';
-import { buildTableElement, tableRowGroups, headerRowCount } from './table-layout.mjs';
+import { buildTableElement, cellDisplayMarks, tableRowGroups, headerRowCount } from './table-layout.mjs';
 import { buildRuby } from './ruby.mjs';
 const MM = 96 / 25.4;
 export const families = {serif:'SimSun,"Songti SC",serif',sans:'"Microsoft YaHei",sans-serif',kai:'KaiTi,STKaiti,serif'};
@@ -36,10 +37,10 @@ function inline(el,b,l,text,start=0) {
     if(cursor<text.length)inline(el,{...b,ruby:[]},l,text.slice(cursor),start+cursor);
     return;
   }
-  const boundaries=new Set([0,text.length]),notes=[...text.matchAll(/\[\^([-\w]+)\]/g)];
+  const boundaries=new Set([0,text.length]),notes=[...text.matchAll(/\[\^([-\w]+)\]/g)],formulas=mathTokens(text),atoms=[...notes,...formulas];
   for(const m of b.marks||[])for(const pos of [m.start-start,m.end-start])if(pos>0&&pos<text.length)boundaries.add(pos);
-  for(const n of notes){boundaries.add(n.index);boundaries.add(n.index+n[0].length);}
-  for(const n of notes)for(const point of boundaries)if(point>n.index&&point<n.index+n[0].length)boundaries.delete(point);
+  for(const n of atoms){boundaries.add(n.index);boundaries.add(n.index+n[0].length);}
+  for(const n of atoms)for(const point of boundaries)if(point>n.index&&point<n.index+n[0].length)boundaries.delete(point);
   const cuts=[...boundaries].sort((a,b)=>a-b);
   for(let i=0;i<cuts.length-1;i++) {
     const begin=cuts[i],end=cuts[i+1],str=text.slice(begin,end),span=document.createElement('span');
@@ -47,15 +48,22 @@ function inline(el,b,l,text,start=0) {
     const note=notes.find(n=>n.index===begin&&n[0].length===end-begin);
     if(note) {
       const index=(l._notes||[]).findIndex(n=>n.id===note[1]);
-      span.className='note-reference';span.dataset.number=index<0?'?':index+1;
+      span.className='note-reference';span.dataset.number=index<0?'?':(l._notes[index].marker??index+1);
       span.title=index<0?'注释未定义':l._notes[index].text;
     }
-    span.textContent=str;el.append(span);
+    const formula=formulas.find(m=>m.index===begin&&m[0].length===end-begin);
+    if(formula){
+      const value=b.inlineMath?.find(m=>m.id===formula[1])?.text;
+      span.className='inline-math';span.dataset.mathId=formula[1];span.title=value||'公式缺少定义';
+      if(globalThis.katex&&value!==undefined)globalThis.katex.render(value,span,{displayMode:false,throwOnError:false,trust:false,maxExpand:1000,strict:'warn'});
+      else span.textContent=value??str;
+    }else span.textContent=str;
+    el.append(span);
   }
 }
 export function notesElement(ids,l) {
   const el=document.createElement('div');el.className='page-notes';
-  for(const id of ids){const i=l._notes.findIndex(n=>n.id===id);if(i<0)continue;const p=document.createElement('div');p.textContent=`${i+1}　${l._notes[i].text}`;el.append(p);}
+  for(const id of ids){const i=l._notes.findIndex(n=>n.id===id);if(i<0)continue;const p=document.createElement('div');p.textContent=`${l._notes[i].marker??i+1}　${l._notes[i].text}`;el.append(p);}
   return el;
 }
 export function blockElement(b,l,text=b.text,continued=false,part={}) {
@@ -67,8 +75,8 @@ export function blockElement(b,l,text=b.text,continued=false,part={}) {
     if(globalThis.katex)try{globalThis.katex.render(text,el,{displayMode:true,throwOnError:false,trust:false,maxExpand:1000,strict:'warn'});}catch(e){el.textContent=`公式错误：${e.message}`;}
     else el.textContent=text;
   } else if(b.type==='table') {
-    if(b.text){const caption=document.createElement('div');caption.className='table-caption';caption.textContent=b.text+(continued?'（续）':'');el.append(caption);}
-    const table=buildTableElement(b,{rowIndexes:part.rowIndexes,renderCell:(td,text)=>inline(td,{marks:[]},l,text)});
+    if(b.text){const caption=document.createElement('div');caption.className='table-caption';inline(caption,b,l,b.text+(continued?'（续）':''));el.append(caption);}
+    const table=buildTableElement(b,{rowIndexes:part.rowIndexes,renderCell:(td,text,{row,col})=>inline(td,{inlineMath:b.inlineMath,marks:cellDisplayMarks(b,row,col)},l,text)});
     el.append(table);
   } else if(b.type==='toc'||b.type==='index') {
     if(!continued){const title=document.createElement('h2');title.textContent=b.text||(b.type==='toc'?'目录':'索引');el.append(title);}
@@ -99,7 +107,7 @@ function once(doc,measure,entries) {
   newPage();
   let blocks=doc.blocks.map(b=>['toc','index'].includes(b.type)?{...b,_entries:entries[b.id]||[]}:b);
   const endnotes=l.notesMode==='endnote'?l._notes:l._notes.filter(n=>longNotes.has(n.id));
-  if(endnotes.length){blocks=[...blocks,{id:'_endnotes-title',type:'heading',text:'注释',fontFamily:'sans',level:1,_generated:true},...endnotes.map(n=>({id:`_endnote-${n.id}`,type:'paragraph',text:`${l._notes.indexOf(n)+1}　${n.text}`,indent:0,_generated:true}))];if(l.notesMode!=='endnote')warnings.push('超过版心高度 35% 的长注释已移到文末，避免脚注溢出。');}
+  if(endnotes.length){blocks=[...blocks,{id:'_endnotes-title',type:'heading',text:'注释',fontFamily:'sans',level:1,_generated:true},...endnotes.map(n=>({id:`_endnote-${n.id}`,type:'paragraph',text:`${n.marker??l._notes.indexOf(n)+1}　${n.text}`,indent:0,_generated:true}))];if(l.notesMode!=='endnote')warnings.push('超过版心高度 35% 的长注释已移到文末，避免脚注溢出。');}
   for(const b of blocks){
     if(b.type==='pageBreak'){newPage();continue;}
     if(['table','toc','index'].includes(b.type)){

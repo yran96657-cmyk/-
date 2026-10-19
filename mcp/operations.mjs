@@ -7,7 +7,7 @@ export function checkDocument(raw){
   documentSchema.parse(raw);
   const ids=new Set();for(const b of raw.blocks){if(b.id){if(ids.has(b.id))throw Error(`DUPLICATE_ID: ${b.id}`);ids.add(b.id);}if(b.headerRows!==undefined&&b.headerRows>(b.rows?.length??0))throw Error('INVALID_HEADER_ROWS');}
   for(const b of raw.blocks){
-    for(const key of ['rows','headerRows','borderStyle','merges','columnWidths'])if(b[key]!==undefined&&b.type!=='table')throw Error(`PROPERTY_REQUIRES_TABLE: ${key}`);
+    for(const key of ['rows','headerRows','borderStyle','merges','columnWidths','cellMarks'])if(b[key]!==undefined&&b.type!=='table')throw Error(`PROPERTY_REQUIRES_TABLE: ${key}`);
     for(const key of ['src','width','wrap'])if(b[key]!==undefined&&b.type!=='image')throw Error(`PROPERTY_REQUIRES_IMAGE: ${key}`);
     if(b.type==='table'&&new Set(b.rows?.map(r=>r.length)).size>1)throw Error('RAGGED_TABLE_ROWS');
   }
@@ -21,7 +21,7 @@ function boundary(text,index){
   if(index<0||index>text.length)throw Error('INVALID_OFFSET');
   const points=new Set([text.length,...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(text)].map(x=>typeof x==='number'?x:x.index));
   if(!points.has(index))throw Error('INVALID_GRAPHEME_BOUNDARY');
-  for(const m of text.matchAll(/\[\^[-\w]+\]|\[\[(?:ref|cite):[-\w]+\]\]/g))if(index>m.index&&index<m.index+m[0].length)throw Error('REFERENCE_TOKEN_IS_ATOMIC');
+  for(const m of text.matchAll(/\[\^[-\w]+\]|\[\[(?:ref|cite|math):[-\w]+\]\]/g))if(index>m.index&&index<m.index+m[0].length)throw Error('REFERENCE_TOKEN_IS_ATOMIC');
 }
 export function chapterIds(doc,headingId){
   const at=doc.blocks.findIndex(b=>b.id===headingId);const heading=doc.blocks[at];if(heading?.type!=='heading')throw Error('CHAPTER_HEADING_NOT_FOUND');
@@ -38,6 +38,7 @@ export function applyOperations(input,rawOps){
   const upsert=(key,value)=>{const at=doc[key].findIndex(x=>x.id===value.id);if(at<0)doc[key].push(value);else doc[key][at]=value;};
   const erase=(key,id)=>{if(!doc[key].some(x=>x.id===id))throw Error('RECORD_NOT_FOUND');doc[key]=doc[key].filter(x=>x.id!==id);};
   for(const raw of rawOps){const o=operation.parse(raw);switch(o.op){
+    case 'set_journal':doc.journal=o.journal;break;
     case 'set_title':doc.title=o.title;break;
     case 'set_layout':Object.assign(doc.layout,o.patch);break;
     case 'insert_blocks':insert(o.blocks,o.beforeId);break;
@@ -56,7 +57,7 @@ export function applyOperations(input,rawOps){
     case 'apply_style':{const s=doc.styles.find(s=>s.name===o.name);if(!s)throw Error('STYLE_NOT_FOUND');const {name,...patch}=s;for(const id of o.blockIds){const b=get(id);if(!['heading','paragraph'].includes(b.type))throw Error('STYLE_NEEDS_TEXT_BLOCK');Object.assign(b,patch);}break;}
     case 'set_index':doc.indexTerms=o.terms;break;
     case 'set_bookmarks':doc.bookmarks=o.bookmarks;break;
-    case 'table_set_cell':{const b=table(o.blockId);if(b.rows[o.row]?.[o.col]===undefined)throw Error('CELL_NOT_FOUND');b.rows[o.row][o.col]=o.text;break;}
+    case 'table_set_cell':{const b=table(o.blockId);if(b.rows[o.row]?.[o.col]===undefined)throw Error('CELL_NOT_FOUND');const styles=b.cellMarks?.find(c=>c.row===o.row&&c.col===o.col);const cell={text:b.rows[o.row][o.col],marks:styles?.marks||[]};replaceBlockText(cell,o.text);b.rows[o.row][o.col]=cell.text;if(styles)styles.marks=cell.marks;break;}
     case 'table_merge':Object.assign(table(o.blockId),mergeCells(table(o.blockId),o.range));break;
     case 'table_split':Object.assign(table(o.blockId),splitCell(table(o.blockId),o.row,o.col));break;
     case 'table_resize':Object.assign(table(o.blockId),resizeTable(table(o.blockId),o.axis,o.index,o.remove));break;

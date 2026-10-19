@@ -19,7 +19,7 @@ export function runTextOperations(doc,operations,blockId=null){
     if(!['paragraph','heading'].includes(b.type)||(blockId&&b.id!==blockId))continue;
     let text=b.text;
     // References are structural tokens, never subject to case or width changes.
-    for(const op of operations)text=text.split(/(\[\^[-\w]+\])/g).map(s=>/^\[\^[-\w]+\]$/.test(s)?s:transformText(s,op)).join('');
+    for(const op of operations)text=text.split(/(\[\^[-\w]+\]|\[\[(?:ref|cite|math):[-\w]+\]\])/g).map(s=>/^(?:\[\^[-\w]+\]|\[\[(?:ref|cite|math):[-\w]+\]\])$/.test(s)?s:transformText(s,op)).join('');
     if(text!==b.text){replaceBlockText(b,text);changed++;}
   }
   return {doc:validateDocument(next),changed};
@@ -39,7 +39,7 @@ export function compareDocuments(before,after){
 export function assembleBook(doc,chapters){
   const next=structuredClone(validateDocument(doc)),warnings=[];
   for(const raw of chapters){
-    const chapter=validateDocument(raw),ids=new Map(),noteIds=new Map(),bibIds=new Map();
+    const chapter=validateDocument(raw);if(chapter.journal||next.journal)throw Error('期刊论文暂不支持直接合书；请分别验收首面与刊内页码。');const ids=new Map(),noteIds=new Map(),bibIds=new Map();
     for(const b of chapter.blocks)ids.set(b.id,uid());
     for(const n of chapter.notes)noteIds.set(n.id,'n'+uid().replaceAll('-',''));
     for(const n of chapter.bibliography)bibIds.set(n.id,'b'+uid().replaceAll('-',''));
@@ -48,12 +48,13 @@ export function assembleBook(doc,chapters){
     for(const b of chapter.blocks){
       // Update ranges one token at a time so imported character styles keep their positions.
       for(const m of [...b.text.matchAll(/\[\^([-\w]+)\]|\[\[(ref|cite):([-\w]+)\]\]/g)].reverse())replaceBlockText(b,b.text.slice(0,m.index)+remap(m[0])+b.text.slice(m.index+m[0].length));
-      b.id=ids.get(b.id);if(b.rows)b.rows=b.rows.map(r=>r.map(remap));next.blocks.push(b);
+      b.id=ids.get(b.id);if(b.anchor)b.anchor.targetId=ids.get(b.anchor.targetId);if(b.captionIds)b.captionIds=b.captionIds.map(id=>ids.get(id));if(b.rows)b.rows=b.rows.map(r=>r.map(remap));next.blocks.push(b);
     }
     next.notes.push(...chapter.notes.map(n=>({...n,id:noteIds.get(n.id),text:remap(n.text)})));
     next.bibliography.push(...chapter.bibliography.map(n=>({...n,id:bibIds.get(n.id)})));
     next.comments.push(...chapter.comments.map(c=>({...c,id:uid(),blockId:ids.get(c.blockId)})));
     next.proSources.push(...chapter.proSources);
+    next.importReports.push(...chapter.importReports);
     next.bookmarks.push(...chapter.bookmarks.map(b=>({...b,blockId:ids.get(b.blockId)})));
     next.indexTerms=[...new Set([...next.indexTerms,...chapter.indexTerms])];
     for(const s of chapter.styles){if(!next.styles.some(x=>x.name===s.name))next.styles.push(s);else if(JSON.stringify(next.styles.find(x=>x.name===s.name))!==JSON.stringify(s))warnings.push(`章节“${chapter.title}”的同名样式“${s.name}”使用当前工程定义；已有段落直接格式保留。`);}

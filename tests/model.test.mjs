@@ -28,7 +28,7 @@ test("invalid layout never silently corrupts geometry", () => {
 });
 test("reject unsupported file versions and external image URLs", () => {
   const doc = sampleDocument();
-  assert.throws(() => validateDocument({ ...doc, version: 3 }));
+  assert.throws(() => validateDocument({ ...doc, version: 5 }));
   assert.throws(() =>
     validateDocument({
       ...doc,

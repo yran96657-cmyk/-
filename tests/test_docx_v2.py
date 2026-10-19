@@ -19,7 +19,7 @@ class DocxTests(unittest.TestCase):
     def test_notes(self):
         notes='<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:id="1"><w:p><w:r><w:t>注释</w:t></w:r></w:p></w:footnote></w:footnotes>'
         result=import_docx(package('<w:p><w:r><w:t>正文</w:t><w:footnoteReference w:id="1"/></w:r></w:p>',{'word/footnotes.xml':notes}))
-        self.assertEqual(result['blocks'][0]['text'],'正文[^1]'); self.assertEqual(result['notes'],[{'id':'1','text':'注释'}])
+        self.assertEqual(result['blocks'][0]['text'],'正文[^1]'); self.assertEqual(result['notes'],[{'id':'1','text':'注释','marker':'1'}])
     def test_entities(self):
         with self.assertRaises(ValueError): import_docx(package('<!DOCTYPE x>'))
 if __name__=='__main__': unittest.main()

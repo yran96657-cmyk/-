@@ -1,4 +1,4 @@
-import unittest, tempfile, os
+import unittest, tempfile, os, shutil
 from pathlib import Path
 from publishing import safe_math, build_tex, render_pdf, TEX_DEFAULT
 
@@ -13,8 +13,8 @@ class PublishingTests(unittest.TestCase):
         self.assertEqual(safe_math(r'\frac{a_1}{\sqrt{b}}+\begin{matrix}1&2\\3&4\end{matrix}'),r'\frac{a_1}{\sqrt{b}}+\begin{matrix}1&2\\3&4\end{matrix}')
     def test_escape_and_structure(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]/'tmp') as d:
-            source,warnings=build_tex({'layout':{'columns':2},'notes':[{'id':'n','text':'注释'}],'blocks':[{'type':'paragraph','text':r'\input{x}[^n]'},{'type':'table','rows':[['标题','数值'],['甲','1']],'headerRows':1,'borderStyle':'three-line'},{'type':'toc'}]},d)
-            self.assertIn(r'\textbackslash{}input\{x\}',source); self.assertIn(r'\footnote{注释}',source)
+            source,warnings=build_tex({'layout':{'columns':2},'notes':[{'id':'n','text':'注释'}],'blocks':[{'type':'paragraph','text':r'\input{x}[^n]'},{'type':'table','placement':'full-width','rows':[['标题','数值'],['甲','1']],'headerRows':1,'borderStyle':'three-line'},{'type':'toc'}]},d)
+            self.assertIn(r'\textbackslash{}input\{x\}',source); self.assertIn(r'\footnote[1]{注释}',source)
             self.assertIn(r'\endhead',source); self.assertIn(r'\begin{longtable}',source); self.assertIn(r'\tableofcontents',source)
     def test_table_titles_and_endnote_numbers(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]/'tmp') as d:
@@ -58,8 +58,8 @@ class PublishingTests(unittest.TestCase):
     def test_vertical_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]/'tmp') as d:
             with self.assertRaises(ValueError): build_tex({'layout':{'vertical':True}},d)
-    @unittest.skipUnless(TEX_DEFAULT.exists(),'XeLaTeX not installed')
+    @unittest.skipUnless(shutil.which('xelatex') or TEX_DEFAULT.exists(),'XeLaTeX not installed')
     def test_real_compile(self):
-        doc={'layout':{'columns':2},'notes':[{'id':'1','text':'真实脚注内容'}],'indexTerms':['测试'],'blocks':[{'type':'toc'},{'type':'heading','level':1,'text':'中文测试'},{'type':'paragraph','text':'测试正文及脚注[^1]。','ruby':[{'start':0,'end':2,'text':'cè shì'}],'marks':[{'start':0,'end':2,'bold':True}]},{'type':'equation','text':r'\frac{1}{2}+\sqrt{x}'},{'type':'table','text':'表 1 原创测试数据','headerRows':1,'borderStyle':'three-line','rows':[['名称','数量']]+[['中文长表格测试',str(i)] for i in range(80)]},{'type':'table','text':'合并表格','rows':[['甲','乙','A'],['丙','丁','B'],['C','D','E']],'columnWidths':[20,30,50],'headerRows':1,'merges':[{'row':0,'col':0,'rowspan':2,'colspan':2}]},{'type':'index','text':''}]}
+        doc={'layout':{'fontSet':'fandol','columns':2},'notes':[{'id':'1','text':'真实脚注内容'}],'indexTerms':['测试'],'blocks':[{'type':'toc'},{'type':'heading','level':1,'text':'中文测试'},{'type':'paragraph','text':'测试正文及脚注[^1]。','ruby':[{'start':0,'end':2,'text':'cè shì'}],'marks':[{'start':0,'end':2,'bold':True}]},{'type':'equation','text':r'\frac{1}{2}+\sqrt{x}'},{'type':'table','text':'表 1 原创测试数据','headerRows':1,'borderStyle':'three-line','rows':[['名称','数量']]+[['中文长表格测试',str(i)] for i in range(80)]},{'type':'table','text':'合并表格','rows':[['甲','乙','A'],['丙','丁','B'],['C','D','E']],'columnWidths':[20,30,50],'headerRows':1,'merges':[{'row':0,'col':0,'rowspan':2,'colspan':2}]},{'type':'index','text':''}]}
         result=render_pdf(doc); self.assertTrue(result['pdf'].startswith(b'%PDF')); self.assertGreater(len(result['pdf']),10000)
 if __name__=='__main__': unittest.main()

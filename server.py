@@ -7,6 +7,7 @@ import argparse
 import json
 import base64
 import binascii
+import hashlib
 import subprocess
 import os
 import xml.etree.ElementTree as ET
@@ -34,9 +35,13 @@ class Handler(SimpleHTTPRequestHandler):
         route = self.path.split('?',1)[0]
         allowed = {'/','/index.html','/style.css','/flow-layout.css','/table-editor.css','/workspace-tools.css','/src/app.mjs','/src/model.mjs','/src/pagination.mjs','/src/fbd.mjs','/src/advanced-ui.mjs','/src/editor-tools.mjs','/src/flow-layout.mjs','/src/table-layout.mjs','/src/table-editor.mjs','/src/workspace-tools.mjs','/src/production-ui.mjs','/src/pro.mjs','/src/pro-ui.mjs'}
         vendor = (ROOT / unquote(route).lstrip('/')).resolve()
-        allowed.update({'/ruby.css','/src/ruby.mjs'})
+        allowed.update({'/src/integrity.mjs','/src/proof-ui.mjs','/ruby.css','/src/ruby.mjs'})
         allowed.update({'/src/references.mjs','/src/mcp-ui.mjs','/src/project-sync.mjs'})
+        allowed.update({'/src/journal.mjs','/src/journal-ui.mjs','/node_modules/pdfjs-dist/build/pdf.mjs','/node_modules/pdfjs-dist/build/pdf.worker.mjs'})
         vendor_ok = route.startswith('/vendor/katex/') and vendor.is_relative_to((ROOT/'vendor/katex').resolve()) and vendor.is_file()
+        for directory in ('cmaps','standard_fonts','wasm'):
+            prefix='/node_modules/pdfjs-dist/'+directory+'/'
+            if route.startswith(prefix) and vendor.is_relative_to((ROOT/prefix.lstrip('/')).resolve()) and vendor.is_file(): vendor_ok=True
         if route not in allowed and not vendor_ok:
             self.send_error(404); return
         super().do_GET()
@@ -55,12 +60,13 @@ class Handler(SimpleHTTPRequestHandler):
         origin = self.headers.get('Origin')
         if origin and origin not in {f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'}:
             self.send_error(403); return
-        if self.path not in {'/api/import-docx','/api/export-pdf','/api/production','/api/mcp-projects'}:
+        if self.path not in {'/api/import-docx','/api/render-proof','/api/export-pdf','/api/production','/api/mcp-projects'}:
             self.send_error(404); return
         try:
             length = int(self.headers.get('Content-Length','0'))
-            if not 0 < length <= MAX_UPLOAD:
-                raise ValueError('文件大小必须在 1 字节至 20 MB 之间。')
+            limit=MAX_UPLOAD if self.path=='/api/import-docx' else 100*1024*1024
+            if not 0 < length <= limit:
+                raise ValueError('请求超过限制（DOCX 20 MB，工程 100 MB）。')
             data = self.rfile.read(length)
             if self.path == '/api/mcp-projects':
                 env = dict(os.environ)
@@ -71,30 +77,32 @@ class Handler(SimpleHTTPRequestHandler):
                 result=json.loads(run.stdout)
                 payload=json.dumps(result,ensure_ascii=False).encode('utf-8')
                 self.send_response(400 if run.returncode else 200);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
-            if self.path == '/api/production':
+            if self.path in ('/api/production','/api/render-proof'):
                 from print_production import process_pdf
-                request = json.loads(data)
+                from proof import render_proof, inspect_output
+                request=json.loads(data)
                 if not isinstance(request,dict): raise ValueError('出版请求格式无效。')
-                warnings=[]
                 if 'doc' in request:
                     doc=request['doc']
-                    if not isinstance(doc,dict) or doc.get('format')!='open-typesetter' or doc.get('version') not in (1,2): raise ValueError('工程格式无效。')
-                    compiled=render_pdf(doc); source=compiled['pdf'];warnings=compiled['warnings']
-                elif isinstance(request.get('pdf'),str): source=base64.b64decode(request['pdf'],validate=True)
+                    if not isinstance(doc,dict) or doc.get('format')!='open-typesetter' or doc.get('version') not in (1,2,3,4): raise ValueError('工程格式无效。')
+                    production=render_proof(doc,request.get('options',{}))
+                elif isinstance(request.get('pdf'),str):
+                    production=inspect_output(process_pdf(base64.b64decode(request['pdf'],validate=True),request.get('options',{})))
                 else: raise ValueError('缺少工程或 PDF。')
-                production=process_pdf(source,request.get('options',{}))
-                production['report']['layoutWarnings']=warnings
                 payload=json.dumps({'pdf':base64.b64encode(production['pdf']).decode('ascii'),'report':production['report']},ensure_ascii=False).encode('utf-8')
                 self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
             if self.path == '/api/export-pdf':
                 doc = json.loads(data)
-                if not isinstance(doc,dict) or doc.get('format')!='open-typesetter' or doc.get('version') not in (1,2):
+                if not isinstance(doc,dict) or doc.get('format')!='open-typesetter' or doc.get('version') not in (1,2,3,4):
                     raise ValueError('工程格式无效。')
                 result = render_pdf(doc)
                 payload = result['pdf']
                 self.send_response(200)
                 self.send_header('Content-Type','application/pdf')
                 self.send_header('Content-Length',str(len(payload)))
+                self.send_header('X-Production-Ready','false')
+                self.send_header('X-PDF-SHA256',hashlib.sha256(payload).hexdigest())
+                result['warnings'] += [d['message'] for r in doc.get('importReports',[]) for d in r['diagnostics']]
                 self.send_header('X-Layout-Warnings',quote(json.dumps(result['warnings'],ensure_ascii=False)))
                 self.end_headers()
                 self.wfile.write(payload)
