@@ -40,6 +40,9 @@ export function setupAdvanced({getDoc,getSelected,change,insert,select,status,re
       const style=document.createElement('select');for(const [v,t] of [['grid','网格表'],['three-line','三线表'],['none','无框线']]){const op=document.createElement('option');op.value=v;op.textContent=t;style.append(op);}style.value=b.borderStyle||'grid';style.onchange=()=>mutate(block=>block.borderStyle=style.value);panel.append(label('表格样式',style));
       panel.append(button('增加一行',()=>mutate(block=>block.rows.push(Array(block.rows[0].length).fill('')))));
     }
+    if((b.type==='image'||b.type==='table')&&b.placement==='full-width'){
+      const float=document.createElement('select');for(const [v,t]of [['in-flow','随正文排放'],['top','后续页顶，正文填补余白']]){const o=document.createElement('option');o.value=v;o.textContent=t;float.append(o);}float.value=b.floatPlacement||'in-flow';float.onchange=()=>mutate(block=>block.floatPlacement=float.value);panel.append(label('PDF 图表排放',float));
+    }
     if(b.type==='equation'){const p=document.createElement('p');p.className='hint';p.textContent='上方填写 LaTeX 数学式，支持分数、根式、上下标、求和和矩阵等。禁止文件和宏命令。';panel.append(p);}
     if(b.type==='index'){const terms=document.createElement('textarea');terms.rows=8;terms.value=(getDoc().indexTerms||[]).join('\n');terms.onchange=()=>change(()=>getDoc().indexTerms=[...new Set(terms.value.split('\n').map(s=>s.trim()).filter(Boolean))]);panel.append(label('索引词（每行一项）',terms));}
     if(['toc','index'].includes(b.type)){const p=document.createElement('p');p.className='hint';p.textContent='页码按当前预览自动更新；独立 PDF 后端会重新计算自己的页码。';panel.append(p);}

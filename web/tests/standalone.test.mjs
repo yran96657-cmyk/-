@@ -31,7 +31,7 @@ test('standalone authentication, persistence, version restore, MCP tokens and su
   const tokenHTML=await(await post('/account/token','',cookie)).text();const token=tokenHTML.match(/<pre>([A-Za-z0-9_-]{43})<\/pre>/)[1];
   const rpc=()=>req('/mcp',{method:'POST',headers:{authorization:'Bearer '+token},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'list_projects',arguments:{}}})});
   assert.equal((await(await rpc()).json()).result.structuredContent.projects.length,1);
-  const list=await req('/mcp',{method:'POST',headers:{authorization:'Bearer '+token},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/list'})});assert.equal((await list.json()).result.tools.length,83);
+  const list=await req('/mcp',{method:'POST',headers:{authorization:'Bearer '+token},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/list'})});assert.equal((await list.json()).result.tools.length,84);
   assert.equal((await post('/account/token','',cookie,{authorization:'Bearer '+token})).status,303);
   assert.equal((await req('/%2e%2e%2fserver.mjs')).status,404);
   assert.equal((await req('/.env')).status,404);

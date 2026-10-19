@@ -8,6 +8,7 @@ export function addJournalTools(add,store){
  async function refreshProof(m){const current=await store.get(m.projectId);return {...m,stale:current.revision!==m.revision};}
  async function getProof(a){return refreshProof(await runtime().status(store.owner,a.proofId));}
  add('get_journal_capabilities','查询当前部署是否启用真实 OMML 导入和全文期刊 PDF。',obj({}),()=>store?.journalRuntime?.capabilities||{enabled:false,reason:'需配置独立服务器的 journal 运行时；Workers 不支持本地 TeX。'},true);
+ add('inspect_journal_docx','只读检查 DOCX 是否能完整导入。返回公式/图表数量、每个未支持对象的原稿 XML 位置和资产指纹；不创建工程，不执行 OLE，不表示可发印。',obj({base64:z.string().max(28000000).regex(/^[A-Za-z0-9+/]+={0,2}$/)}),a=>runtime().inspectDocx(a.base64),true);
  add('import_journal_docx','从 DOCX 新建完整期刊工程；保存每个公式的 OMML 和摘要，未支持内容拒绝写入。不会覆盖现有工程。',obj({projectId:id,title:z.string().max(120),base64:z.string().max(28000000).regex(/^[A-Za-z0-9+/]+={0,2}$/)}),async a=>{
   const parsed=await runtime().importDocx(a.base64);
   return store.create(a.projectId,{format:'open-typesetter',version:4,title:a.title,blocks:parsed.blocks,notes:parsed.notes,importReports:parsed.importReports});

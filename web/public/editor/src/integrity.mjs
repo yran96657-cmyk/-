@@ -1,3 +1,4 @@
+import {legacySource} from './asset-sources.mjs';
 import {journalDiagnostics} from './journal.mjs';
 // Inline formulas have stable IDs. The marker is atomic in the editable text;
 // its TeX lives outside text so edits cannot silently move or duplicate it.
@@ -8,7 +9,7 @@ export function validateInlineMath(block) {
   if(raw.length&&!['paragraph','heading','table'].includes(block.type))throw Error('行内公式只能位于正文、标题或表格。');
   const ids=new Set(),items=raw.map(m=>{
     if(!m||!/^[-\w]{1,80}$/.test(m.id)||ids.has(m.id)||typeof m.text!=='string'||m.text.length>20000)throw Error('行内公式 ID 重复或内容无效。');
-    ids.add(m.id);const result={id:m.id,text:m.text};if(m.sourceOmml!==undefined||m.sourceSha256!==undefined){if(typeof m.sourceOmml!=='string'||!m.sourceOmml.length||m.sourceOmml.length>300000||!(/^[a-f0-9]{64}$/).test(m.sourceSha256))throw Error('公式来源记录无效。');result.sourceOmml=m.sourceOmml;result.sourceSha256=m.sourceSha256;}return result;
+    ids.add(m.id);const result={id:m.id,text:m.text};if(m.sourceOmml!==undefined||m.sourceSha256!==undefined){if(typeof m.sourceOmml!=='string'||!m.sourceOmml.length||m.sourceOmml.length>300000||!(/^[a-f0-9]{64}$/).test(m.sourceSha256))throw Error('公式来源记录无效。');result.sourceOmml=m.sourceOmml;result.sourceSha256=m.sourceSha256;}if(m.legacySource!==undefined)result.legacySource=legacySource(m.legacySource);return result;
   });
   const used=new Set();
   for(const text of [block.text,...(block.rows||[]).flat()]){
@@ -28,7 +29,13 @@ export function validateImportReports(raw) {
     if(!Array.isArray(r.diagnostics)||r.diagnostics.length>10000)throw Error('导入诊断记录无效。');
     const diagnostics=r.diagnostics.map(d=>{
       if(!d||!['error','warning','info'].includes(d.severity)||typeof d.code!=='string'||d.code.length>80||typeof d.message!=='string'||d.message.length>4000)throw Error('导入诊断内容无效。');
-      return {code:d.code,severity:d.severity,message:d.message};
+      const result={code:d.code,severity:d.severity,message:d.message};
+      for(const key of ['sourcePart','sourcePath','sourceAsset'])if(d[key]!==undefined){
+        if(typeof d[key]!=='string'||!d[key].length||d[key].length>2000)throw Error('导入来源位置无效。');
+        result[key]=d[key];
+      }
+      if(d.assetSha256!==undefined){if(!/^[a-f0-9]{64}$/.test(d.assetSha256))throw Error('导入资产指纹无效。');result.assetSha256=d.assetSha256;}
+      return result;
     });
     const counts={};for(const [k,v]of Object.entries(r.counts||{})){if(!/^[a-zA-Z]{1,50}$/.test(k)||!Number.isInteger(v)||v<0||v>1000000)throw Error('导入计数无效。');counts[k]=v;}
     return {kind:'docx',sourceSha256:r.sourceSha256,sourceBytes:r.sourceBytes,counts,diagnostics};

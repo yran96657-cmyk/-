@@ -96,7 +96,11 @@ class Numbering:
 def check_fields(root,warnings,stats=None):
     # EndNote's DATA field stores document metadata, not a visible citation.
     # Do not exempt EN.CITE, EN.REFLIST, or other empty/unknown fields.
-    def metadata(instruction):return instruction.strip()=='ADDIN EN.CITE.DATA'
+    def metadata(instruction):
+        value=' '.join(instruction.split())
+        # MathType's hidden section/chapter counters carry no displayed result.
+        # Do not execute the macro or exempt visible SEQ fields without \\h.
+        return value=='ADDIN EN.CITE.DATA' or value=='MACROBUTTON MTEditEquationSection2' or bool(re.fullmatch(r'SEQ MT(?:Eqn|Sec|Chap) \\r(?: [0-9]+)? \\h \\\* MERGEFORMAT',value))
     stack=[];count=0;metadata_count=0
     for e in root.iter():
         if e.tag==W+'fldSimple':

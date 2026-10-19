@@ -1,3 +1,4 @@
+import {legacySource,vectorSource} from './asset-sources.mjs';
 export const journalRoles=['title-zh','authors-zh','affiliation-zh','abstract-zh','keywords-zh','classification','title-en','authors-en','affiliation-en','abstract-en','keywords-en','citation','article-note','reference'];
 export function validateJournal(raw,blocks,notes=[]){
   if(raw===undefined){if(blocks.some(b=>b.role&&b.role!=='reference'))throw Error('首面角色须启用期刊模板。');return undefined;}
@@ -34,6 +35,9 @@ export function validateJournal(raw,blocks,notes=[]){
 }
 export function journalBlockFields(b){
   const fields={};
+  if(b.floatPlacement!==undefined){if(!['in-flow','top'].includes(b.floatPlacement)||!['image','table'].includes(b.type)||b.floatPlacement==='top'&&(b.placement!=='full-width'||b.sideTextIds?.length))throw Error('页顶浮动仅支持通栏图或短表。');fields.floatPlacement=b.floatPlacement;}
+  if(b.legacySource!==undefined){if(b.type!=='equation')throw Error('旧式公式来源类型无效。');fields.legacySource=legacySource(b.legacySource);}
+  if(b.vectorSource!==undefined){if(b.type!=='image')throw Error('矢量来源类型无效。');fields.vectorSource=vectorSource(b.vectorSource);}
   if(b.role!=null){if(!journalRoles.includes(b.role)||!['paragraph','heading'].includes(b.type))throw Error('期刊语义角色无效。');fields.role=b.role;}
   if(b.sourceOmml!==undefined||b.sourceSha256!==undefined){if(b.type!=='equation'||typeof b.sourceOmml!=='string'||!b.sourceOmml.length||b.sourceOmml.length>300000||!(/^[a-f0-9]{64}$/).test(b.sourceSha256))throw Error('公式来源无效。');fields.sourceOmml=b.sourceOmml;fields.sourceSha256=b.sourceSha256;}
   for(const key of ['equationNumber','equationSuffix'])if(b[key]!==undefined){if(b.type!=='equation'||typeof b[key]!=='string'||b[key].length>80)throw Error('公式编号或后缀无效。');fields[key]=b[key];}

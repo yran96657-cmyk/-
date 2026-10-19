@@ -167,7 +167,7 @@ export function validateDocument(raw) {
   return {
     ...(journal?{journal}:{}),
     format: "open-typesetter",
-    version: raw.version===4||journal||raw.notes?.some(n=>n.marker!==undefined)||blocks.some(b=>b.role||b.anchor||b.captionIds||b.sourceOmml||b.cellMarks||b.cellImages||b.captionPosition||b.equationNumber!==undefined||b.inlineMath?.some(m=>m.sourceOmml))?4:raw.version===3||raw.composition||raw.layout?.fontSet||raw.importReports?.length||blocks.some(b=>b.inlineMath?.length||b.placement)?3:2,
+    version: raw.version===4||journal||raw.notes?.some(n=>n.marker!==undefined)||blocks.some(b=>b.role||b.anchor||b.captionIds||b.sourceOmml||b.legacySource||b.vectorSource||b.cellMarks||b.cellImages||b.captionPosition||b.equationNumber!==undefined||b.inlineMath?.some(m=>m.sourceOmml||m.legacySource))?4:raw.version===3||raw.composition||raw.layout?.fontSet||raw.importReports?.length||blocks.some(b=>b.inlineMath?.length||b.placement)?3:2,
     ...(raw.composition ? {composition:validateComposition(raw.composition)} : {}),
     title: String(raw.title || "未命名文稿").slice(0, 120),
     layout,

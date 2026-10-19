@@ -1,5 +1,8 @@
 # Optional: PDF preflight/imposition text geometry, and WebP/TIFF conversion.
-# Basic editing and DOCX import use only Python's standard library.
+# Basic editing/OMML DOCX import use only Python's standard library.
+# Legacy MTEF requires olefile; EMF requires PDFium and LibreOffice Draw.
 pypdf>=6.9.1,<7
 Pillow>=11,<13
 pdfminer.six>=20251230,<20270000
+olefile>=0.47,<0.48
+pypdfium2>=4.30,<6

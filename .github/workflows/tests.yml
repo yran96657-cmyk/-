@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends texlive-xetex texlive-lang-chinese texlive-latex-extra texlive-fonts-recommended texlive-plain-generic latex-cjk-common
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends texlive-xetex texlive-lang-chinese texlive-latex-extra texlive-fonts-recommended texlive-plain-generic latex-cjk-common libreoffice-draw
       - run: python -m pip install -r web/journal-engine/requirements-test.txt
       - run: python web/journal-engine/run_tests.py
       - run: npm ci

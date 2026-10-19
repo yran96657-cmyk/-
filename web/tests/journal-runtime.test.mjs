@@ -65,6 +65,17 @@ test('MCP rejects stale proof by default and binds diagnostics and pages to its 
  }finally{await f.cleanup();}
 });
 
+test('unavailable fonts reject before occupying a worker slot or creating a proof',async()=>{
+ const f=await fixture({maxProofs:1});try{
+  const profiles={cjk:{fandol:{available:true},'source-han':{available:false,missingFonts:['Source Han Serif SC']}},latin:{'tex-default':{available:true}},math:{'tex-default':{available:true}},bodyWeight:{regular:{available:true}}};
+  f.runtime.capabilities.environment.fonts={profiles};
+  const input=record();input.document.layout={fontSet:'source-han'};
+  assert.throws(()=>f.runtime.start('alice',input),/JOURNAL_FONTS_UNAVAILABLE.*Source Han Serif SC/);
+  assert.equal(input.document.layout.fontSet,'source-han');input.document.layout.fontSet='fandol';
+  const started=await f.runtime.start('alice',input);assert.equal((await completed(f.runtime,started.proofId)).status,'complete');
+ }finally{await f.cleanup();}
+});
+
 test('MCP rechecks the project after reading proof artifacts, including explicitly allowed old PDFs',async()=>{
  let revision=1;
  const meta={proofId:'proof-race',projectId:'p',revision:1,status:'complete'};

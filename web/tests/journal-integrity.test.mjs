@@ -12,6 +12,13 @@ import {findMatches,replaceAll} from '../public/editor/src/editor-tools.mjs';
 
 const report=()=>({kind:'docx',sourceSha256:'a'.repeat(64),sourceBytes:123,counts:{sourceMath:1,importedMath:1,sourceImages:1,importedImages:0},diagnostics:[{code:'DOCX_CONTENT_REVIEW',severity:'error',message:'未转换的原稿图片'}]});
 const source=()=>({format:'open-typesetter',version:3,title:'期刊测试',layout:{fontSet:'fandol',width:170,height:240,columns:2},importReports:[report()],blocks:[{id:'p',type:'paragraph',text:'若[[math:m]]成立。',inlineMath:[{id:'m',text:'x>0'}]},{id:'table',type:'table',rows:[['[[math:a]]','1']],inlineMath:[{id:'a',text:'a^2'}]}]});
+test('persistent import evidence retains source locations and validates asset hashes',()=>{
+ const doc=source(),diagnostic=doc.importReports[0].diagnostics[0];
+ Object.assign(diagnostic,{sourcePart:'word/document.xml',sourcePath:'/document[1]/body[1]/p[7]/r[2]/object[1]',sourceAsset:'word/embeddings/equation.bin',assetSha256:'b'.repeat(64)});
+ assert.deepEqual(checkDocument(doc).importReports[0].diagnostics[0],diagnostic);
+ diagnostic.assetSha256='invalid';assert.throws(()=>validateDocument(doc),/资产指纹/);
+ diagnostic.assetSha256='b'.repeat(64);diagnostic.sourcePath='x'.repeat(2001);assert.throws(()=>validateDocument(doc),/来源位置/);
+});
 test('v3 round-trip preserves formula positions and persistent import evidence',()=>{
   const doc=checkDocument(source());assert.equal(doc.version,3);assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(doc))),doc);
   assert.equal(doc.blocks[0].inlineMath[0].text,'x>0');assert.equal(doc.blocks[1].rows[0][0],'[[math:a]]');assert.deepEqual(doc.importReports,[report()]);

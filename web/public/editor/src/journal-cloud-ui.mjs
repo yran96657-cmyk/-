@@ -1,4 +1,5 @@
 import {documentFingerprint} from './project-sync.mjs';
+import {showJournalReport} from './journal-report-ui.mjs';
 
 export function setupJournalCloud({api,connection,getDoc,button,status}){
  const saveFile=(name,data,type)=>{const url=URL.createObjectURL(new Blob([data],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};
@@ -17,8 +18,10 @@ export function setupJournalCloud({api,connection,getDoc,button,status}){
    if(connection.projectId!==previousProject||documentFingerprint(getDoc())!==before){status('期刊工程已保存到项目库。导入期间的新输入仍保留，请从项目库打开新工程。');return;}
    if(await connection.open(projectId)===false){status('期刊工程已保存到项目库。当前打开操作已被其他工程操作取代，请从项目库打开新工程。');return;}
    history.replaceState(null,'','?project='+projectId);
-   const counts=r.document.importReports[0].counts;
-   status(`已导入 ${counts.importedMath}/${counts.sourceMath} 个数学区、${counts.importedImages} 张图。请在“期刊模板”和右侧“期刊角色”指定首面字段。`);
+   const report=r.document.importReports[0],counts=report.counts;
+   const errors=report.diagnostics?.filter(d=>d.severity==='error').length||0;
+   const legacy=counts.sourceLegacyMath?`（含 ${counts.sourceLegacyMath} 个旧式公式）`:'';
+   status(`已导入 ${counts.importedMath}/${counts.sourceMath} 个数学区${legacy}、${counts.importedImages}/${counts.sourceImages??'未知'} 张图。`+(errors?`有 ${errors} 项导入阻断，须修复后再交付；请查看预检报告。`:'请在“期刊模板”和右侧“期刊角色”指定首面字段。'),!!errors);
   }catch(e){status(e.message,true);}finally{importing=false;}
  };
  async function finish(proofId,projectId){
@@ -36,6 +39,7 @@ export function setupJournalCloud({api,connection,getDoc,button,status}){
   saveFile(`${getDoc().title}-校样报告.json`,JSON.stringify(result,null,2),'application/json');
   const errors=result.report.quality.diagnostics.filter(d=>d.severity==='error');
   status(`${result.pages} 页 PDF 和报告已下载；${result.report.formulaCoverage.total} 个数学区。${errors.length?`预检有 ${errors.length} 项阻断，请按报告修复。`:'请逐页核对公式和版面后交编辑验收。'}`,!!errors.length);
+  showJournalReport(result);
  }
  button('全文期刊 PDF',async()=>{
   if(!connection.projectId)throw Error('请先保存到云端');

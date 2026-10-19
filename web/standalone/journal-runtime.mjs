@@ -5,6 +5,7 @@ import {mkdir,readFile,writeFile,rename,readdir,chmod} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {documentFingerprint} from '../public/editor/src/project-sync.mjs';
+import {assertJournalFonts} from '../public/editor/src/journal-fonts.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const safeId=value=>{if(!/^[a-zA-Z0-9][\w-]{0,79}$/.test(value))throw Error('INVALID_PROOF_ID');return value;};
@@ -48,7 +49,9 @@ export async function createJournalRuntime({directory,python='python3',engineDir
  return {
   capabilities,
   async importDocx(base64){ready();return track(worker({method:'import',base64}));},
+  async inspectDocx(base64){ready();return track(worker({method:'inspect',base64}));},
   start(owner,record){
+   assertJournalFonts(record.document,capabilities.environment?.fonts);
    // Reserve before any filesystem await: simultaneous requests cannot both start.
    ready();let resolveStart,rejectStart;
    const started=new Promise((resolve,reject)=>{resolveStart=resolve;rejectStart=reject;});
