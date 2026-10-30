@@ -26,6 +26,14 @@
     -webkit-font-smoothing: antialiased;
   }
   body.workbench [hidden] { display: none !important; }
+  /* Preserve geometry for font measurement while the legacy controls are
+     assembled into the workbench. Startup dialogs must remain actionable. */
+  body.workbench[data-starting] > :not(.workbench-startup):not(dialog) { visibility: hidden; }
+  body.workbench .workbench-startup { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: var(--wb-board); color: var(--wb-muted); }
+  body.workbench .workbench-startup p { margin: 0; font-size: 13px; }
+  body.workbench .workbench-startup nav { display: flex; gap: 20px; }
+  body.workbench .workbench-startup a { color: #b5c9ed; text-decoration: none; }
+  body.workbench .workbench-startup a:hover { text-decoration: underline; }
   body.workbench > .topbar, body.workbench > .toolbar { display: none; }
   body.workbench :is(button, input, select, textarea) { font: inherit; }
   body.workbench button { min-height: 30px; border: 1px solid var(--wb-rule-2); border-radius: 4px; background: var(--wb-raise); color: var(--wb-ink); cursor: pointer; }
