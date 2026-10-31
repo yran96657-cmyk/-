@@ -1,5 +1,6 @@
 import {legacySource} from './asset-sources.mjs';
 import {journalDiagnostics} from './journal.mjs';
+import {figureDiagnostics} from './figure-audit.mjs';
 // Inline formulas have stable IDs. The marker is atomic in the editable text;
 // its TeX lives outside text so edits cannot silently move or duplicate it.
 export const mathTokens = text => [...String(text).matchAll(/\[\[math:([-\w]+)\]\]/g)];
@@ -42,5 +43,7 @@ export function validateImportReports(raw) {
   });
 }
 export function documentDiagnostics(doc) {
-  return [...(doc.importReports||[]).flatMap(r=>r.diagnostics.map(d=>({...d,sourceSha256:r.sourceSha256}))),...journalDiagnostics(doc)];
+  const figures=figureDiagnostics(doc),repaired=figures.length===0&&doc.blocks.some(b=>b.type==='image'||b.cellImages?.length);
+  const comments=(doc.comments||[]).filter(c=>!c.resolved).map(c=>({code:'EDITORIAL_COMMENT_UNRESOLVED',severity:'warning',message:c.text,blockId:c.blockId,commentId:c.id}));
+  return [...comments,...(doc.importReports||[]).flatMap(r=>r.diagnostics.map(d=>({...d,...(repaired&&d.code==='DOCX_FIGURE_CONTENT_MISSING'?{severity:'info',message:'原稿未嵌入图体；当前图题已关联图件，请核对图件来源与清晰度。'}:{}),sourceSha256:r.sourceSha256}))),...journalDiagnostics(doc),...figures];
 }

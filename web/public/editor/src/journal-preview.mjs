@@ -25,17 +25,19 @@ export function journalPreviewStyle(block,journal){
  return {fontSize:`${fontSize}pt`,lineHeight:String((custom.leading??leading)/fontSize),fontWeight:(custom.bold??bold)?'700':'400',textAlign:align,textIndent:/^(abstract|keywords)-/.test(block.role)?'13.8pt':'0',paddingTop:`${custom.spaceBefore??(block.role.startsWith('title')?4:0)}pt`,paddingBottom:`${custom.spaceAfter??0}pt`,fontFamily:custom.fontFamily||'serif'};
 }
 
-// A contiguous, ordinary front matter band can span the text columns. Oversized
-// or footnoted bands fall back to the regular paginator without losing content.
-export function journalFrontMatter(doc,measure,maxHeight){
+// The PDF normalizer ignores imported run-level type sizes/faces, retaining
+// emphasis and script positioning. Measurement must follow the same rule.
+export function journalPreviewMark(mark,journal){
+ if(!journal||journal.normalizeTypography===false)return mark;
+ const {fontFamily,fontSize,...semantic}=mark;return semantic;
+}
+
+// Match the PDF engine's semantic front matter order, retaining source IDs.
+// Reserve actual footnotes before deciding whether the band fits this page.
+export function journalFrontMatter(doc,measure,maxHeight,measureNotes=()=>0){
  if(!doc.journal||doc.layout.columns<2||doc.layout.writingMode==='vertical-rl')return {parts:[],height:0};
- const blocks=[];
- for(const block of doc.blocks){
-  if(!['paragraph','heading'].includes(block.type)||!roles[block.role]||['reference','article-note'].includes(block.role))break;
-  blocks.push(block);
- }
- if(blocks.some(b=>/\[\^/.test(b.text)))return {parts:[],height:0};
+ const blocks=doc.blocks.filter(block=>['paragraph','heading'].includes(block.type)&&roles[block.role]&&!['reference','article-note'].includes(block.role));
  const parts=blocks.map(block=>({block,text:block.text,start:0,end:block.text.length,height:measure(block),fullWidth:true}));
  const height=parts.reduce((sum,part)=>sum+part.height,0);
- return height>0&&Number.isFinite(height)&&height<=maxHeight?{parts,height}:{parts:[],height:0};
+ return height>0&&Number.isFinite(height)&&height+measureNotes(blocks.map(b=>b.text).join('\n'))<=maxHeight?{parts,height}:{parts:[],height:0};
 }

@@ -86,6 +86,19 @@
   body.workbench .wb-rail-divider { flex: 0 0 1px; width: 20px; margin: 6px 0; background: var(--wb-rule-2); }
   body.workbench.wb-composition .wb-toolrail :is(.wb-rail-insert, .wb-rail-review) { display: none; }
   body.workbench .wb-stage { position: relative; display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; background: var(--wb-board); }
+  body.workbench .wb-selection, body.workbench .wb-asset-notice { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-height: 38px; padding: 4px 16px; border-bottom: 1px solid var(--wb-line); background: var(--wb-panel); font-size: 12px; }
+  body.workbench .wb-selection-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--wb-muted); }
+  body.workbench .wb-selection button { flex: 0 0 auto; min-height: 28px; }
+  body.workbench .wb-selection .wb-delete { color: #f0b4ac; border-color: #62423e; }
+  body.workbench .wb-selection .wb-delete:hover { background: #48302d; }
+  body.workbench .wb-asset-notice { color: #e9c78f; background: #332c21; }
+  body.workbench .wb-asset-notice > span { flex: 1; }
+  body.workbench .wb-delete-dialog { max-width: 440px; }
+  body.workbench .wb-delete-dialog p { line-height: 1.7; }
+  body.workbench .wb-delete-dialog label { display: flex; align-items: center; gap: 8px; }
+  body.workbench .wb-delete-dialog input { width: auto; }
+  body.workbench .wb-delete-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+  body.workbench .wb-toast-undo { flex: 0 0 auto; }
   body.workbench .canvas, body.workbench .composition-mode .canvas { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: 0 32px 40px; background: var(--wb-board); background-image: none; }
   body.workbench #pages { padding: 32px 0 8px; }
   body.workbench .paper-wrap { margin: 0 auto 32px; }
@@ -353,6 +366,7 @@
 @media print {
   .workbench .wb-header, .workbench .wb-dock, .workbench .wb-toolrail, .workbench .wb-footer, .workbench .wb-menu, .workbench .wb-scrim, .workbench .wb-bubble, .workbench .wb-toast, .workbench .wb-sr { display: none !important; }
   .workbench .wb-stage { display: block; overflow: visible; }
+  .workbench .wb-selection, .workbench .wb-asset-notice { display: none !important; }
 }
 
 /* Agent tasks share the desktop inspector, keeping the manuscript in view. */

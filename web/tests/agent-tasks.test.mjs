@@ -98,7 +98,7 @@ test('proof-only tasks skip the model and protect current revision',async t=>{
 test('a deployment without a model still supports proof tasks and rejects layout before creating a task',async t=>{
  const f=await fixture(t);f.alice.layoutAssistant=undefined;
  const cap=await callTool(f.alice,'get_agent_capabilities',{});
- assert.equal(cap.enabled,true);assert.deepEqual(cap.modes,['proof']);assert.equal(cap.layoutModelConfigured,false);
+ assert.equal(cap.enabled,true);assert.deepEqual(cap.modes,['prepare','proof']);assert.equal(cap.layoutModelConfigured,false);
  await assert.rejects(f.start,/LAYOUT_ASSISTANT_UNAVAILABLE/);
  assert.equal((await callTool(f.alice,'list_agent_tasks',{})).tasks.length,0);
  const done=await f.terminal(await callTool(f.alice,'start_agent_task',{...f.args,mode:'proof'}));
@@ -154,4 +154,19 @@ test('a temporarily occupied proof worker is retried without a second layout wri
 
 test('archiving removes a project from the global task desk without deleting its history',async t=>{
  const f=await fixture(t),done=await f.terminal(await f.start());await f.alice.archive('paper',2,true);assert.equal((await callTool(f.alice,'list_agent_tasks',{})).tasks.length,0);assert.equal((await callTool(f.alice,'list_agent_tasks',{projectId:'paper'})).tasks.length,1);assert.equal((await f.read(done)).stale,true);
+});
+
+
+test('prepare handles an unclassified manuscript without a model and undo restores its exact source',async t=>{
+ const f=await fixture(t);f.alice.layoutAssistant=undefined;
+ const d=(await f.alice.get('paper')).document;delete d.journal;
+ const texts=['中文题目','张三','（某大学）','摘要：测试','关键词：测试','English title','ZHANG San','(School of Test University)','Abstract: Test','Keywords: Test','1 引言','正文','参考文献','[1] Test'];
+ d.blocks=texts.map((text,i)=>({id:'raw'+i,type:'paragraph',text}));await f.alice.create('raw',d);
+ const before=(await f.alice.get('raw')).document;
+ const started=await callTool(f.alice,'start_agent_task',{...f.args,projectId:'raw',mode:'prepare'});
+ await f.until(async()=>(await callTool(f.alice,'get_agent_task',{projectId:'raw',taskId:started.taskId})).status!=='running');
+ const done=await callTool(f.alice,'get_agent_task',{projectId:'raw',taskId:started.taskId});
+ assert.equal(done.status,'review');assert.equal(done.appliedRevision,2);assert.equal(f.events.includes('start_layout_plan'),false);
+ const after=(await f.alice.get('raw')).document;assert.equal(after.layout.columns,2);assert.equal(after.blocks[0].role,'title-zh');assert.deepEqual(after.blocks.map(b=>b.text),texts);
+ await callTool(f.alice,'undo_agent_task',{projectId:'raw',taskId:done.taskId,expectedRevision:2});assert.deepEqual((await f.alice.get('raw')).document,before);
 });

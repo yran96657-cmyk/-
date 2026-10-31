@@ -1,7 +1,7 @@
 // Report data can contain manuscript text. Render only text nodes, never HTML.
-export function showJournalReport(result,{openPdf,downloadPdf,downloadReport}={}){
+export function showJournalReport(result,{openPdf,downloadPdf,downloadReport,editJournal,locateBlock}={}){
  const report=result.report,quality=report.quality,items=quality.diagnostics||[];
- const errors=items.filter(d=>d.severity==='error'),warnings=items.filter(d=>d.severity!=='error');
+ const errors=items.filter(d=>d.severity==='error'),warnings=items.filter(d=>d.severity==='warning'),evidence=items.filter(d=>d.severity==='info');
  const dialog=document.createElement('dialog');dialog.className='proof-dialog';dialog.setAttribute('aria-labelledby','proofTitle');
  const append=(parent,tag,text)=>{const el=document.createElement(tag);el.textContent=text;parent.append(el);return el;};
  const header=append(dialog,'header','');header.className='proof-heading';
@@ -16,9 +16,13 @@ export function showJournalReport(result,{openPdf,downloadPdf,downloadReport}={}
  const actionError=append(dialog,'p','');actionError.hidden=true;actionError.setAttribute('role','alert');
  for(const [text,fn,primary] of [['打开 PDF 校样',openPdf,true],['下载 PDF',downloadPdf],['检查报告',downloadReport]])if(fn){const b=append(actions,'button',text);b.type='button';if(primary)b.className='primary';b.onclick=async()=>{if(b.disabled)return;b.disabled=true;actionError.hidden=true;try{await fn();}catch(e){actionError.textContent=e.message;actionError.hidden=false;}finally{b.disabled=false;}};}
  append(dialog,'p','检查绑定当前修订。修改文稿后，请重新生成校样。').className='proof-context';
- for(const [heading,entries] of [['必须修复',errors],['待核对',warnings]]){
+ for(const [heading,entries] of [['必须修复',errors],['待核对',warnings],['来源核验记录',evidence]]){
   if(!entries.length)continue;
-  append(dialog,'h3',heading);const list=append(dialog,'ol','');
+  const parent=entries===evidence?append(dialog,'details',''):dialog;
+  append(parent,entries===evidence?'summary':'h3',entries===evidence?`${heading}（${entries.length}）`:heading);const list=append(parent,'ol','');
+  if(editJournal&&entries.some(d=>d.code==='JOURNAL_METADATA_REVIEW'&&!d.blockId)){
+   const edit=append(parent,'button','补全刊物信息');edit.type='button';edit.onclick=()=>{dialog.close();editJournal();};
+  }
   for(const d of entries){
    const li=append(list,'li','');li.style.marginBottom='16px';
    const pages=new Set(d.page?[d.page]:[]);
@@ -28,6 +32,7 @@ export function showJournalReport(result,{openPdf,downloadPdf,downloadReport}={}
    }
    const position=pages.size?`PDF 第 ${[...pages].sort((a,b)=>a-b).join('、')} 页 · `:'';
    append(li,'strong',position+(d.message||d.code));
+   if(locateBlock&&d.blockId){const locate=append(li,'button','定位并编辑');locate.type='button';locate.onclick=()=>{dialog.close();locateBlock(d.blockId);};}
    if(d.sourcePath){const detail=append(li,'p',`原稿位置：${d.sourcePart||''}${d.sourcePath}${d.sourceAsset?' · '+d.sourceAsset:''}`);detail.style.cssText='font-size:12px;overflow-wrap:anywhere';}
    const locations=d.sourceLocations||d.candidateLocations||[];
    if(locations.length)append(li,'p','候选来源（需对照 PDF 确认具体位置）：');

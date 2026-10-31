@@ -273,20 +273,30 @@ export class History {
     this.limit = limit;
     this.past = [];
     this.future = [];
+    this.selection = null;
   }
-  push(doc) {
-    this.past.push(JSON.stringify(doc));
+  push(doc, selected = null) {
+    this.past.push({json:JSON.stringify(doc), selected});
     if (this.past.length > this.limit) this.past.shift();
     this.future = [];
   }
-  undo(doc) {
-    if (!this.past.length) return null;
-    this.future.push(JSON.stringify(doc));
-    return JSON.parse(this.past.pop());
+  clear() {
+    this.past = [];
+    this.future = [];
+    this.selection = null;
   }
-  redo(doc) {
+  undo(doc, selected = null) {
+    if (!this.past.length) return null;
+    this.future.push({json:JSON.stringify(doc), selected});
+    const snapshot = this.past.pop();
+    this.selection = snapshot.selected;
+    return JSON.parse(snapshot.json);
+  }
+  redo(doc, selected = null) {
     if (!this.future.length) return null;
-    this.past.push(JSON.stringify(doc));
-    return JSON.parse(this.future.pop());
+    this.past.push({json:JSON.stringify(doc), selected});
+    const snapshot = this.future.pop();
+    this.selection = snapshot.selected;
+    return JSON.parse(snapshot.json);
   }
 }

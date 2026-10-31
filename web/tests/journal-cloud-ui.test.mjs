@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {setupJournalCloud} from '../public/editor/src/journal-cloud-ui.mjs';
 
 test('incomplete imports show the legacy equation denominator and an error state',async t=>{
- const picker={files:[{name:'synthetic.docx',size:1,arrayBuffer:async()=>new Uint8Array([0]).buffer}]},messages=[];
+ const picker={files:[{name:'synthetic.docx',size:1,arrayBuffer:async()=>new Uint8Array([0]).buffer}]},messages=[],notices=[];
  const descriptors=['document','history'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]);
  t.after(()=>{for(const [key,d] of descriptors){if(d)Object.defineProperty(globalThis,key,d);else delete globalThis[key];}});
- globalThis.document={createElement:()=>picker,body:{append(){}}};globalThis.history={replaceState(){}};
+ globalThis.document={createElement:()=>picker,body:{append(){}},dispatchEvent:event=>{if(event.detail)notices.push(event.detail);}};globalThis.history={replaceState(){}};
  const doc={title:'Current',blocks:[]},connection={projectId:'current',open:async()=>true};
  setupJournalCloud({connection,getDoc:()=>doc,button(){},status:(message,error)=>messages.push({message,error}),api:async()=>({document:{importReports:[{counts:{sourceMath:378,importedMath:0,sourceLegacyMath:378,sourceImages:18,importedImages:2},diagnostics:[{severity:'error',message:'公式缺失'}]}]}})});
- await picker.onchange();assert.match(messages.at(-1).message,/0\/378.*378 个旧式公式.*2\/18.*阻断/);assert.equal(messages.at(-1).error,true);
+ await picker.onchange();assert.match(messages.at(-1).message,/0\/378.*378 个旧式公式.*2\/18.*阻断/);assert.equal(messages.at(-1).error,true);assert.equal(notices[0].message,messages.at(-1).message);assert.equal(notices[0].tone,'error');
 });
 
 test('a superseded journal import open cannot change the active project URL',async t=>{

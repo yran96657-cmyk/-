@@ -34,9 +34,12 @@ test('report shows physical pages, candidates, revision and untrusted text as te
  const nodes=fakeDom(t),payload='<img src=x onerror=alert(1)>';
  const dialog=showJournalReport({projectId:'qa',revision:7,pages:12,report:{formulaCoverage:{total:295},quality:{productionReady:false,diagnostics:[
   {severity:'error',code:'TEX_MISSING_GLYPH',message:'字体缺字：啟',compilerMessage:payload,sourceLocations:[{objectId:'ref',pages:[12,12],excerpt:payload}]},
-  {severity:'warning',code:'JOURNAL_METADATA_REVIEW',message:'出版日期待确认'}]}}});
+  {severity:'warning',code:'JOURNAL_METADATA_REVIEW',message:'出版日期待确认'},
+  {severity:'info',code:'SOURCE_EVIDENCE',message:'保留核验记录'}]}}});
  const text=nodes.map(n=>n.textContent).join('\n');
  assert.match(text,/1 项阻断/);assert.match(text,/r7/);assert.match(text,/PDF 第 12 页/);assert.match(text,/候选来源/);assert.match(text,/字体缺字：啟/);assert.ok(text.includes(payload));assert.match(text,/自动检查不等于可发印/);assert.equal(dialog.open,true);
+ const evidence=nodes.find(n=>n.tag==='details'&&n.children.some(c=>c.textContent==='来源核验记录（1）'));
+ assert.ok(evidence);assert.ok(!evidence.open);assert.match(text,/保留核验记录/);
  nodes.find(n=>n.tag==='button').onclick();assert.equal(dialog.removed,true);
 });
 test('proof metrics come from the report and PDF actions remain explicit',t=>{
@@ -52,4 +55,11 @@ test('changing a light-weight source-han profile requires an explicit compatible
  const selects=nodes.filter(n=>n.tag==='select');const cjk=selects.find(n=>n.children.some(c=>c.value==='fandol'));const weight=selects.find(n=>n.children.some(c=>c.value==='light'));
  cjk.value='fandol';const save=nodes.find(n=>n.textContent==='应用期刊模板');save.onclick();assert.deepEqual(d,before);assert.match(messages[0],/轻字重只适用于思源/);
  weight.value='regular';save.onclick();assert.equal(d.layout.fontSet,'fandol');assert.equal(d.journal.bodyWeight,'regular');
+});
+
+test('report links metadata and source warnings back to editable controls',t=>{
+ const nodes=fakeDom(t),called=[];
+ const dialog=showJournalReport({revision:2,pages:1,report:{quality:{diagnostics:[{code:'JOURNAL_METADATA_REVIEW',severity:'warning',message:'请补全中文刊名',field:'name'},{code:'PUBLICATION_METADATA_PLACEHOLDER',severity:'warning',message:'文章编号仍有占位符',blockId:'cite'}]}}},{editJournal:()=>called.push('journal'),locateBlock:id=>called.push(id)});
+ nodes.find(n=>n.textContent==='补全刊物信息').onclick();assert.deepEqual(called,['journal']);assert.equal(dialog.removed,true);
+ nodes.find(n=>n.textContent==='定位并编辑').onclick();assert.deepEqual(called,['journal','cite']);
 });

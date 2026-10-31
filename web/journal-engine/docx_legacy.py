@@ -7,7 +7,7 @@ from mtef import convert_ole
 
 def equation(element, archive, relationships):
     objects=list(element.iter(O+'OLEObject'))
-    if len(objects)!=1 or not legacy_math(objects[0]):raise ValueError('非单一 MathType/Equation 对象')
+    if len(objects)!=1 or (objects[0].get('ProgID','').strip() and not legacy_math(objects[0])):raise ValueError('非单一 MathType/Equation 对象')
     obj=objects[0];path=relationships.get(obj.get(R+'id'),'')
     if not path.startswith('word/embeddings/') or path not in archive.namelist():raise ValueError('缺少内嵌公式资产')
     raw=archive.read(path);result=convert_ole(raw)

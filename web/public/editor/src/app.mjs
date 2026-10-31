@@ -28,6 +28,10 @@ import {setupComposition} from './composition-ui.mjs';
 import {setupPrintExport} from './print-ui.mjs';
 import {setupNativeEditor} from './native-ui.mjs';
 import {setupWorkbench} from './workbench.mjs';
+import {blockDeletion,blockLabel,isBlockDeleteKey} from './block-actions.mjs';
+import {figureGroups} from './figure-audit.mjs';
+import {createDraftStore} from './draft-store.mjs';
+import {confirmAction} from './dialogs.mjs';
 const $ = (id) => document.getElementById(id),
   storageKey = "shuye-web-"+(new URLSearchParams(location.search).get("project")||"sample"),
   history = new History();
@@ -36,14 +40,20 @@ let doc = makeTemplate("book","文字的秩序"),
   zoom = 0.8,
   paginationTimer,
   editingSnapshot = null,
+  editingSelected = null,
   renderVersion = 0,
   lastPages = [];
 let advancedUI, compositionUI, selectionRange=null;
+const localDrafts=createDraftStore();
+let localDraftTimer,localDraftSequence=0;
 let startupWarning = "",
   protectAutosave = false;
 try {
-  const saved = localStorage.getItem(storageKey);
-  if (saved && !new URLSearchParams(location.search).has("project")) doc = validateDocument(JSON.parse(saved));
+  if(!new URLSearchParams(location.search).has('project')){
+    const current=await localDrafts.read('@anonymous');
+    if(current?.document)doc=validateDocument(current.document);
+    else {let saved;try{saved=localStorage.getItem(storageKey);}catch{}if(saved){doc=validateDocument(JSON.parse(saved));await localDrafts.write('@anonymous',{document:doc});try{localStorage.removeItem(storageKey);}catch{}}}
+  }
 } catch (e) {
   protectAutosave = true;
   startupWarning = "自动保存未能读取，已显示示例。" + e.message;
@@ -55,20 +65,31 @@ function status(message, error = false) {
 }
 function persist() {
   document.dispatchEvent(new Event('shuye:document-changed'));
+  if(new URLSearchParams(location.search).has('project')){
+    // ProjectConnection owns project-scoped IndexedDB drafts. Do not duplicate
+    // image-heavy cloud documents into the small anonymous localStorage slot.
+    return;
+  }
   if (protectAutosave) {
     $("saveState").textContent = "原自动保存已保留，请另存工程";
     return;
   }
-  try {
-    localStorage.setItem(storageKey, JSON.stringify(doc));
-    $("saveState").textContent = "已自动保存到此浏览器";
-  } catch {
-    $("saveState").textContent = "自动保存失败，请保存工程";
-    status("浏览器存储空间不足或已禁用，请点击“保存工程”备份。", true);
+  clearTimeout(localDraftTimer);const sequence=++localDraftSequence;
+  localDraftTimer=setTimeout(()=>saveAnonymousDraft(sequence),400);
+}
+async function saveAnonymousDraft(sequence=++localDraftSequence){
+  if(protectAutosave||new URLSearchParams(location.search).has('project'))return;
+  try{
+    await localDrafts.write('@anonymous',{document:doc});
+    if(sequence===localDraftSequence&&!new URLSearchParams(location.search).has('project'))$('saveState').textContent='已自动保存到此浏览器';
+  }catch{
+    if(sequence===localDraftSequence&&!new URLSearchParams(location.search).has('project')){$('saveState').textContent='自动保存失败，请下载备份';status('浏览器草稿保存失败，请使用“下载备份”保存工程。',true);}
   }
 }
+window.addEventListener('pagehide',()=>{clearTimeout(localDraftTimer);void saveAnonymousDraft();});
+
 function checkpoint() {
-  history.push(doc);
+  history.push(doc,selected);
   updateHistory();
 }
 function updateHistory() {
@@ -112,6 +133,11 @@ function fillLayout() {
 }
 function fillBlock() {
   const b = active();
+  $('deleteBlock').disabled = !b;
+  $('moveUp').disabled = !b || doc.blocks.indexOf(b) === 0;
+  $('moveDown').disabled = !b || doc.blocks.indexOf(b) === doc.blocks.length - 1;
+  $('deleteBlock').textContent = '删除' + blockLabel(b);
+  document.dispatchEvent(new Event('shuye:selection-changed'));
   $("emptySelection").hidden = !!b;
   $("blockFields").hidden = !b;
   if (!b) return;
@@ -254,6 +280,7 @@ async function render() {
             clearTimeout(paginationTimer);
             choose(part.block.id);
             editingSnapshot = JSON.stringify(doc);
+            editingSelected = selected;
           };
           el.oninput = () => {
             const b = doc.blocks.find((b) => b.id === part.block.id);
@@ -290,7 +317,7 @@ async function render() {
           };
           el.onblur = () => {
             if (editingSnapshot && editingSnapshot !== JSON.stringify(doc)) {
-              history.push(JSON.parse(editingSnapshot));
+              history.push(JSON.parse(editingSnapshot),editingSelected);
               updateHistory();
             }
             editingSnapshot = null;
@@ -343,9 +370,9 @@ function refresh() {
   return render();
 }
 function change(fn) {
-  const previous=structuredClone(doc);
-  try{fn();doc=validateDocument(doc);}catch(e){doc=previous;fillLayout();fillBlock();status(e.message,true);return Promise.resolve(false);}
-  history.push(previous);
+  const previous=structuredClone(doc),previousSelected=selected;
+  try{fn();doc=validateDocument(doc);}catch(e){doc=previous;selected=previousSelected;fillLayout();fillBlock();status(e.message,true);return Promise.resolve(false);}
+  history.push(previous,previousSelected);
   return refresh();
 }
 function insert(type, extra = {}) {
@@ -431,26 +458,20 @@ $("newDoc").onclick = () => {
     selected = doc.blocks[0].id;
   });
 };
-$("undo").onclick = () => {
-  const prev = history.undo(doc);
-  if (prev) {
-    doc = prev;
-    selected = doc.blocks.some((b) => b.id === selected)
-      ? selected
-      : doc.blocks[0]?.id;
-    refresh();
-  }
-};
-$("redo").onclick = () => {
-  const next = history.redo(doc);
-  if (next) {
-    doc = next;
-    selected = doc.blocks.some((b) => b.id === selected)
-      ? selected
-      : doc.blocks[0]?.id;
-    refresh();
-  }
-};
+function restoreHistory(direction) {
+  const next = history[direction](doc,selected);
+  if (!next) return;
+  doc = next;
+  selected = doc.blocks.some(b=>b.id===history.selection) ? history.selection : doc.blocks[0]?.id;
+  editingSnapshot=null;selectionRange=null;
+  void refresh().then(()=>{
+    if(selected)document.querySelector(`.paper .block[data-id="${CSS.escape(selected)}"]`)?.scrollIntoView({block:'nearest'});
+    const message=direction==='undo'?'已撤销，已恢复原组件选择。':'已重做。';
+    status(message);notice(message);
+  });
+}
+$("undo").onclick = () => restoreHistory('undo');
+$("redo").onclick = () => restoreHistory('redo');
 function fitPage() {
   const canvas=document.querySelector('.canvas'),mm=96/25.4;
   if($('zoom').value!=='fit')return;
@@ -466,6 +487,7 @@ $("guides").onchange = () =>
   $("pages").classList.toggle("hide-guides", !$("guides").checked);
 $("blockText").onfocus = () => {
   editingSnapshot = JSON.stringify(doc);
+  editingSelected = selected;
 };
 $("blockText").oninput = () => {
   const b = active();
@@ -486,7 +508,7 @@ $("blockText").oninput = () => {
 };
 $("blockText").onblur = () => {
   if (editingSnapshot && editingSnapshot !== JSON.stringify(doc)) {
-    history.push(JSON.parse(editingSnapshot));
+    history.push(JSON.parse(editingSnapshot),editingSelected);
     updateHistory();
   }
   editingSnapshot = null;
@@ -513,15 +535,37 @@ for (const [id, key, convert] of [
     }
   };
 }
-$("deleteBlock").onclick = () => {
-  if (!active()) return;
-  change(() => {
-    const index = doc.blocks.findIndex((b) => b.id === selected);
-    doc.blocks.splice(index, 1);
-    doc.comments=doc.comments.filter(c=>c.blockId!==selected);
-    selected = doc.blocks[Math.min(index, doc.blocks.length - 1)]?.id;
-  });
+const notice=(message,tone='info',undo=false)=>document.dispatchEvent(new CustomEvent('shuye:notice',{detail:{message,tone,undo}}));
+async function deleteSelected(includeCaptions=false,id=selected) {
+  const b=doc.blocks.find(b=>b.id===id);if(!b)return;
+  try {
+    const result=blockDeletion(doc,id,{includeCaptions});
+    if(await change(()=>{doc=result.document;selected=result.selected;})===false)return;
+    const message=`已删除${blockLabel(b)}${includeCaptions?'及关联题注':''}。可撤销恢复。`;
+    status(message);notice(message,'info',true);
+    document.querySelector('#wbDeleteBlock')?.focus();
+  } catch(e) {status(e.message,true);notice(e.message,'error');}
+}
+$('deleteBlock').onclick=()=>{
+  const b=active();if(!b)return;
+  const anchored=doc.blocks.filter(a=>a.anchor?.targetId===b.id||a.sideTextIds?.includes(b.id));
+  const cellImages=b.cellImages?.length||0;
+  if(!b.captionIds?.length&&!anchored.length&&!cellImages){void deleteSelected();return;}
+  const d=document.createElement('dialog');d.className='workspace-dialog wb-delete-dialog';
+  const h=document.createElement('h2');h.id='deleteComponentTitle';h.textContent='删除'+blockLabel(b);d.setAttribute('aria-labelledby',h.id);
+  const p=document.createElement('p');p.textContent=[b.captionIds?.length?'默认保留题注。':'',anchored.length?`${anchored.length} 个关联组件将保留在文稿中，解除位置绑定。`:'',cellImages?`${cellImages} 张单元格图片将保留为独立组件。`:''].join('');
+  const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';label.append(check,'同时删除关联题注');label.hidden=!b.captionIds?.length;
+  const actions=document.createElement('div');actions.className='wb-delete-actions';
+  const cancel=document.createElement('button');cancel.textContent='取消';cancel.onclick=()=>d.close();
+  const remove=document.createElement('button');remove.textContent='删除'+blockLabel(b);remove.className='danger';remove.onclick=()=>{const captions=check.checked;d.close();void deleteSelected(captions,b.id);};
+  actions.append(cancel,remove);d.append(h,p,label,actions);d.onclose=()=>{d.remove();document.querySelector('#wbDeleteBlock')?.focus();};document.body.append(d);d.showModal();cancel.focus();
 };
+document.addEventListener('keydown',e=>{
+  if(!isBlockDeleteKey(e)||e.defaultPrevented||document.querySelector('dialog[open]')||document.querySelector('.workspace.composition-mode'))return;
+  if(e.target.closest?.('input,textarea,select,[contenteditable], [role="textbox"]'))return;
+  if(!e.target.closest?.('.canvas,.outline,.wb-selection'))return;
+  e.preventDefault();$('deleteBlock').click();
+});
 for (const [id, delta] of [
   ["moveUp", -1],
   ["moveDown", 1],
@@ -610,7 +654,7 @@ $("fileInput").onchange = async (e) => {
       } else if (ext === "txt") imported = plainDocument(text, title);
       else throw Error("请选择 JSON、TXT、FBD 或 DOCX。");
     }
-    if (!confirm(`打开“${f.name}”并替换当前文稿？当前文稿可通过撤销恢复。`))
+    if (!await confirmAction(`打开“${f.name}”并替换当前文稿？当前文稿可通过撤销恢复。`))
       return;
     await change(() => {
       replacementStarted=true;
@@ -633,9 +677,12 @@ $("fileInput").onchange = async (e) => {
   }
 };
 function extnameIsDocx(name){return /\.docx$/i.test(name);}
-$("addImage").onclick = () => $("imageInput").click();
+let pendingFigure=null;
+$("addImage").onclick = () => {pendingFigure=null;$("imageInput").click();};
+document.addEventListener('shuye:attach-figure',e=>{pendingFigure={blockId:e.detail.blockId,snapshot:JSON.stringify(doc)};$('imageInput').click();});
 $("imageInput").onchange = async (e) => {
   const f = e.target.files[0];
+  const target=pendingFigure;pendingFigure=null;
   e.target.value = "";
   if (!f) return;
   if (f.size > 5 * 1024 * 1024) {
@@ -657,6 +704,14 @@ $("imageInput").onchange = async (e) => {
       i.onerror = () => reject(Error("图片无法解码"));
       i.src = data;
     });
+    if(target){
+      if(target.snapshot!==JSON.stringify(doc))throw Error('选择图片期间文稿已变化，请重新补图。');
+      const group=figureGroups(doc).find(g=>g.blockId===target.blockId&&!g.ownerId&&!g.adjacentId);
+      if(!group)throw Error('该图题已变化或已有图体，请重新检查。');
+      if(doc.blocks.length>=10000||new Blob([JSON.stringify(doc),data]).size>90*1024*1024)throw Error('工程容量不足，请压缩图片或分卷。');
+      await change(()=>{const id=uid();doc.blocks.splice(doc.blocks.findIndex(b=>b.id===group.beforeId),0,{id,type:'image',text:'',src:data,width:80,wrap:'none',captionIds:group.captionIds});selected=id;});
+      status(`已补入图${group.number}并关联题注。`);return;
+    }
     insert("image", {
       src: data,
       width: 80,
@@ -676,7 +731,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (
     e.key.toLowerCase() === "z" &&
-    !e.target.matches("input,textarea,[contenteditable]")
+    !e.target.closest("input,textarea,[contenteditable]")
   ) {
     e.preventDefault();
     $(e.shiftKey ? "redo" : "undo").click();
@@ -706,6 +761,10 @@ setupNativeEditor();
 setupRubyEditor({getDoc:()=>doc,getSelected:()=>selected,getSelectionRange:()=>selectionRange,change,status});
 document.fonts.addEventListener('loadingdone',()=>{clearTimeout(paginationTimer);paginationTimer=setTimeout(()=>render(),100);});
 void refresh();
-const connection=await setupCloud({getDoc:()=>doc,status,replaceDoc:next=>change(()=>{doc=next;selected=doc.blocks[0]?.id;})});
-setupWorkbench({getDoc:()=>doc,connection,fit:fitPage});
+const connection=await setupCloud({getDoc:()=>doc,status,replaceDoc:(next,{resetHistory=false}={})=>{
+  if(!resetHistory)return change(()=>{doc=next;selected=doc.blocks[0]?.id;});
+  const validated=validateDocument(next);doc=validated;selected=doc.blocks[0]?.id;
+  history.clear();editingSnapshot=null;selectionRange=null;return refresh();
+}});
+setupWorkbench({getDoc:()=>doc,getSelected:()=>selected,select:choose,connection,fit:fitPage});
 if (startupWarning) status(startupWarning, true);

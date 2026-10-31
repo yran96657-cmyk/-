@@ -1,4 +1,6 @@
 import {setupAgentTasks} from './agent-task-ui.mjs';
+import {blockLabel} from './block-actions.mjs';
+import {figureGroups} from './figure-audit.mjs';
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const button=(text,fn,cls)=>{const b=el('button',text,cls);b.type='button';b.onclick=fn;return b;};
 const messages={LAYOUT_ASSISTANT_UNAVAILABLE:'当前服务器尚未配置排版助手。',ASSISTANT_BUSY_RETRY:'另一项建议正在生成，请稍后重试。',ASSISTANT_COMPOSITION_NOT_SUPPORTED:'自由版面请使用精确排版工具；当前助手支持流式与期刊版式。',REVISION_CONFLICT:'文稿版本已变化，请重新生成建议。',PLAN_NOT_REVIEWABLE:'这份建议已处理，不能重复应用。',PLAN_NOT_APPLIED:'当前没有可撤销的助手修改。',MODEL_INCOMPLETE_RESPONSE:'模型没有完整返回建议，请重试。',ASSISTANT_MODEL_NOT_INSTALLED:'排版模型尚未准备好，请联系部署管理员。'};
@@ -70,7 +72,7 @@ function spread(layout,{single=false,changed=null,scale=0}={}){
  return svg;
 }
 
-export function setupWorkbench({getDoc,connection,fit}){
+export function setupWorkbench({getDoc,getSelected=()=>null,select=()=>{},connection,fit}){
  const $=id=>document.getElementById(id),body=document.body;
  body.classList.add('workbench');
  const canvas=document.querySelector('.canvas'),workspace=document.querySelector('.workspace'),structure=document.querySelector('.structure'),inspector=document.querySelector('.inspector');
@@ -84,6 +86,7 @@ export function setupWorkbench({getDoc,connection,fit}){
  const cloudSave=oldActions.find(b=>b.textContent==='保存到云端');
  const commands=oldActions.filter(b=>!['undo','redo'].includes(b.id)&&b!==cloudSave);
  if($('newDoc'))commands.push($('newDoc'));
+ commands.push($('deleteBlock'));
  const find=text=>commands.find(b=>b.textContent.trim()===text);
  const modeSwitch=commands.find(b=>/^(自由版面|返回正文)$/.test(b.textContent.trim()));
  // 代理按钮只转发到原按钮，并同步原按钮的禁用状态；原有检查全部保留在原按钮里。
@@ -101,7 +104,7 @@ export function setupWorkbench({getDoc,connection,fit}){
  const foot=el('div',undefined,'command-foot');foot.setAttribute('aria-hidden','true');
  for(const [k,t] of [['↑↓','选择'],['Enter','执行'],['Esc','关闭']]){const s=el('span');s.append(el('kbd',k),t);foot.append(s);}
  dialog.append(dialogHead,searchBox,commandBody,empty,foot);document.body.append(dialog);
- const viewCommands=[['文稿结构',()=>{if(!compMode)setDock('left',true,{focus:true});}],['版式设置',()=>showProps('layout',true)],['当前段落属性',()=>showProps('block',true)],['Agent 任务',()=>showProps('assistant',true)]].map(([text,fn])=>button(text,fn));
+ const viewCommands=[['文稿结构',()=>{if(!compMode)setDock('left',true,{focus:true});}],['版式设置',()=>showProps('layout',true)],['当前组件属性',()=>showProps('block',true)],['Agent 任务',()=>showProps('assistant',true)]].map(([text,fn])=>button(text,fn));
  const registry=[...commands.map(node=>({node,group:node.id==='help'?'帮助':commandGroup(node.textContent)})),...viewCommands.map(node=>({node,group:'视图'}))];
  for(const group of ['文稿','插入','版式','校样','批改','高级','视图','帮助']){
   const items=registry.filter(x=>x.group===group);if(!items.length&&group!=='文稿')continue;
@@ -137,9 +140,12 @@ export function setupWorkbench({getDoc,connection,fit}){
  const live=el('div',undefined,'wb-sr');live.setAttribute('aria-live','polite');
  const toast=el('div',undefined,'wb-toast'),toastText=el('p');toast.hidden=true;
  const toastClose=iconButton('close','关闭提示',()=>hideToast(),'wb-toast-close wb-icon-only');toast.append(toastText,toastClose);
+ const toastUndo=button('撤销',()=>{$('undo').click();hideToast();},'wb-toast-undo');toastUndo.hidden=true;toast.append(toastUndo);
  let toastTimer;
  function hideToast(){clearTimeout(toastTimer);toast.hidden=true;}
- function notify(text,tone='info',sticky=false){clearTimeout(toastTimer);toastText.textContent=text;toast.dataset.tone=tone;toast.hidden=false;live.setAttribute('aria-live',tone==='error'?'assertive':'polite');live.textContent=text;if(!sticky&&tone!=='error')toastTimer=setTimeout(hideToast,9000);}
+ function notify(text,tone='info',sticky=false){clearTimeout(toastTimer);toastUndo.hidden=true;toastText.textContent=text;toast.dataset.tone=tone;toast.hidden=false;live.setAttribute('aria-live',tone==='error'?'assertive':'polite');live.textContent=text;if(!sticky&&tone!=='error')toastTimer=setTimeout(hideToast,9000);}
+ document.addEventListener('shuye:notice',e=>{notify(e.detail.message,e.detail.tone);toastUndo.hidden=!e.detail.undo;});
+ document.addEventListener('shuye:document-changed',()=>{toastUndo.hidden=true;});
  body.append(toast,live);
 
  // —— 顶栏：左侧是文稿身份，右侧是动作；撤销/重做和保存状态都放在对应动作旁边
@@ -166,9 +172,11 @@ export function setupWorkbench({getDoc,connection,fit}){
  if(cloudSave){cloudSave.textContent='保存';cloudSave.classList.remove('primary');cloudSave.classList.add('wb-save');cloudSave.title=`保存到云端 · ${keys('Mod+S')}`;cloudSave.setAttribute('aria-keyshortcuts',ariaKeys('Mod+S'));actions.append(cloudSave);}
  const proofButton=button('出校样',()=>runProof(),'primary wb-proof');
  const toolsButton=iconButton('grid','工具',()=>openCommands(''),'wb-tools');toolsButton.append(el('kbd',keys('Mod+K')));toolsButton.title=`全部工具 · ${keys('Mod+K')}`;toolsButton.setAttribute('aria-keyshortcuts',ariaKeys('Mod+K'));toolsButton.setAttribute('aria-haspopup','dialog');
- const panelToggle=iconButton('panel','属性',()=>toggleDock('right'),'wb-toggle');panelToggle.title='Agent 任务、版式与段落';
+ const panelToggle=iconButton('panel','属性',()=>toggleDock('right'),'wb-toggle');panelToggle.title='Agent 任务、版式与组件';
  const progress=el('div',undefined,'wb-progress');progress.setAttribute('aria-hidden','true');
  const assistantEntry=button('Agent 任务',()=>showProps('assistant',true),'wb-tools wb-assistant-entry');
+ const importEntry=proxy(find('导入期刊 Word'),()=>button('导入 Word',undefined,'wb-tools'));
+ if(importEntry)actions.append(importEntry);
  actions.append(assistantEntry,proofButton,toolsButton,panelToggle);
  header.append(...[back,titleBlock,actions,progress].filter(Boolean));
  body.prepend(header);
@@ -192,7 +200,7 @@ export function setupWorkbench({getDoc,connection,fit}){
  const compPanel=document.querySelector('.composition-inspector');if(compPanel)compView.append(compPanel);
  const panel=el('section',undefined,'assistant-panel');panel.id='layoutAssistant';
  const tabs={};
- for(const [key,text,target,combo] of [['assistant','Agent',panel,'Alt+4'],['layout','版式',$('layoutPanel'),'Alt+2'],['block','段落',$('blockPanel'),'Alt+3'],['composition','页面',compView,'Alt+2']]){
+ for(const [key,text,target,combo] of [['assistant','Agent',panel,'Alt+4'],['layout','版式',$('layoutPanel'),'Alt+2'],['block','组件',$('blockPanel'),'Alt+3'],['composition','页面',compView,'Alt+2']]){
   const tab=button(text,()=>{setView(key);if(!compMode)remember({view});},'wb-tab');tab.id='wbTab-'+key;tab.setAttribute('role','tab');tab.setAttribute('aria-controls',target.id);tab.title=`${text} · ${keys(combo)}`;
   target.setAttribute('role','tabpanel');target.setAttribute('aria-labelledby',tab.id);tabs[key]=tab;tablist.append(tab);
  }
@@ -302,7 +310,37 @@ export function setupWorkbench({getDoc,connection,fit}){
  outlineToggle.classList.add('wb-icon-only');insertButton.classList.add('wb-icon-only','wb-rail-insert');
  for(const b of [findButton,reviewButton])if(b)b.classList.add('wb-icon-only','wb-rail-review');
  rail.append(...[outlineToggle,divider(),...directInserts,insertButton,divider(),findButton,reviewButton].filter(Boolean));
- stage.append(canvas,scrim);workspace.append(menu);
+ const selectionBar=el('div',undefined,'wb-selection');selectionBar.setAttribute('role','group');selectionBar.setAttribute('aria-label','当前组件');
+ const selectionName=el('span',undefined,'wb-selection-name');
+ const props=button('属性',()=>showProps('block',true));
+ const deleteComponent=proxy($('deleteBlock'),()=>button('删除组件',undefined,'wb-delete'));deleteComponent.id='wbDeleteBlock';deleteComponent.title='删除选中的组件；非文字编辑状态可按 Delete / Backspace';
+ const up=proxy($('moveUp'),()=>iconButton('up','上移组件',undefined,'wb-icon-only')),down=proxy($('moveDown'),()=>iconButton('down','下移组件',undefined,'wb-icon-only'));
+ const editTable=proxy(find('编辑表格'),()=>button('编辑表格'));
+ selectionBar.append(selectionName,...[editTable,props,up,down,deleteComponent].filter(Boolean));
+ const assetNotice=el('div',undefined,'wb-asset-notice'),assetSummary=el('span'),assetLocate=button('定位',()=>{}),assetAttach=button('补入图片',()=>{});
+ assetNotice.setAttribute('role','region');assetNotice.setAttribute('aria-label','缺失图片');assetNotice.append(assetSummary,assetLocate,assetAttach);assetNotice.hidden=true;
+ function syncSelection(){
+  selectionBar.hidden=compMode;
+  const d=getDoc(),b=d.blocks.find(b=>b.id===getSelected()),byId=new Map(d.blocks.map(b=>[b.id,b]));
+  const caption=(b?.captionIds||[]).map(id=>byId.get(id)?.text||'').find(t=>/^(图|Fig|表|Tab)/i.test(t.trim()));
+  selectionName.textContent=b?`${blockLabel(b)} · ${(caption||b.text||'未命名').slice(0,48)}`:'选择纸面或结构中的组件';
+  selectionName.title=b?(caption||b.text||blockLabel(b)):'';
+  if(editTable)editTable.hidden=b?.type!=='table';
+  deleteComponent.textContent='删除'+blockLabel(b);deleteComponent.disabled=props.disabled=!b;
+  const missing=figureGroups(d).filter(g=>!g.ownerId&&!g.adjacentId);
+  assetNotice.hidden=compMode||!missing.length;
+  if(missing.length){
+   const g=missing.find(g=>g.blockId===getSelected())||missing[0];
+   assetSummary.textContent=`缺少 ${missing.length} 张图体`;
+   assetLocate.textContent=`定位图${g.number}`;assetLocate.onclick=()=>{select(g.blockId);canvas.querySelector(`[data-id="${CSS.escape(g.blockId)}"]`)?.scrollIntoView({block:'center',behavior:motion()});};
+   assetAttach.textContent=`补入图${g.number}`;assetAttach.onclick=()=>document.dispatchEvent(new CustomEvent('shuye:attach-figure',{detail:{blockId:g.blockId}}));
+  }
+ }
+ document.addEventListener('shuye:selection-changed',syncSelection);
+ document.addEventListener('shuye:edit-journal',()=>find('期刊模板')?.click());
+ document.addEventListener('shuye:locate-block',e=>{const id=e.detail.blockId;if(!getDoc().blocks.some(b=>b.id===id))return;select(id);showProps('block',true);canvas.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'center',behavior:motion()});});
+ document.addEventListener('shuye:document-changed',()=>queueMicrotask(syncSelection));
+ stage.append(selectionBar,assetNotice,canvas,scrim);workspace.append(menu);
  new MutationObserver(()=>{trackPage();paintZoom();}).observe($('pages'),{childList:true});
 
  // 状态栏（InDesign 的位置）：缩放 · 页码 · 版心线 · 纸张信息 · 状态 · 字数。纸面上方不再叠加版面条与尺寸行。
@@ -363,6 +401,7 @@ export function setupWorkbench({getDoc,connection,fit}){
  // —— Agent 连续任务：人下达目标、接管例外、审阅校样。
  let proofBusy=false,agentRunning=false;
  function sync(){
+  syncSelection();
   const d=getDoc();route.textContent=compMode?'自由版面':d.journal?'期刊':'流式文稿';route.dataset.mode=compMode?'composition':d.journal?'journal':'flow';route.hidden=!compMode&&!d.journal;
   if(modeReturn)modeReturn.hidden=!compMode;
   const proofState=connection.journalUI?.proofState?.(),proofLabel=proofState==='ready'?'查看校样':proofState==='stale'?'更新校样':proofState==='running'?'取回校样':'生成校样';
@@ -371,7 +410,7 @@ export function setupWorkbench({getDoc,connection,fit}){
   pdfChip.hidden=!d.journal||compMode;if(previewNote)pdfChip.title=previewNote.textContent;
   if(cloudSave){cloudSave.classList.toggle('is-dirty',!!connection.dirty);cloudSave.setAttribute('aria-label',connection.dirty?'保存，有未保存的修改':'保存');}
  }
- setupAgentTasks({panel,connection,getDoc,notify,onState:task=>{agentRunning=task?.status==='running';proofButton.disabled=proofBusy||agentRunning;tabs.assistant.dataset.state=task?.status||'';assistantEntry.textContent=task?.status==='running'?'Agent 执行中':'Agent 任务';}});
+ setupAgentTasks({panel,connection,getDoc,notify,locate:id=>{select(id);canvas.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:"center",behavior:motion()});},onState:task=>{agentRunning=task?.status==='running';proofButton.disabled=proofBusy||agentRunning;tabs.assistant.dataset.state=task?.status||'';assistantEntry.textContent=task?.status==='running'?'Agent 执行中':'Agent 任务';}});
  async function runProof(){
   if(proofBusy)return;
   if(!getDoc().journal||getDoc().composition){openCommands('校样','校样与输出');return;}

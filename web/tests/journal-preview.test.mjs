@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {journalPreviewStyle,journalFrontMatter,previewHeader} from '../public/editor/src/journal-preview.mjs';
+import {journalPreviewStyle,journalFrontMatter,previewHeader,journalPreviewMark} from '../public/editor/src/journal-preview.mjs';
 import {styleBlock} from '../public/editor/src/pagination.mjs';
 
 test('journal preview preserves shared, odd/even and explicitly empty header overrides',()=>{
@@ -27,9 +27,18 @@ test('journal front matter spans columns once and falls back for oversized or fo
  assert.equal(journalFrontMatter(doc,()=>60,100).parts.length,0);
  assert.equal(journalFrontMatter({...doc,layout:{columns:1}},()=>20,100).parts.length,0);
  assert.equal(journalFrontMatter({...doc,layout:{columns:2,writingMode:'vertical-rl'}},()=>20,100).parts.length,0);
- doc.blocks[0].text+='[^note]';assert.equal(journalFrontMatter(doc,()=>20,100).parts.length,0);
+ doc.blocks[0].text+='[^note]';assert.equal(journalFrontMatter(doc,()=>20,100,()=>30).parts.length,2);
+ assert.equal(journalFrontMatter(doc,()=>20,100,()=>70).parts.length,0);
+ doc.blocks.unshift({id:'stray',type:'paragraph',text:'需核对的游离文字'});
+ assert.deepEqual(journalFrontMatter(doc,()=>20,100,()=>30).parts.map(p=>p.block.id),['title','abstract']);
 });
 test('explicit journal role overrides preserve false bold and zero spacing',()=>{
  const style=journalPreviewStyle({role:'title-zh'},{roleStyles:{'title-zh':{fontSize:16,leading:20,bold:false,spaceBefore:0,spaceAfter:0}}});
  assert.equal(style.fontSize,'16pt');assert.equal(style.lineHeight,'1.25');assert.equal(style.fontWeight,'400');assert.equal(style.paddingTop,'0pt');
+});
+test('imported run sizes do not override normalized journal measurement; semantic emphasis survives',()=>{
+ const mark={start:0,end:6,fontSize:16,fontFamily:'sans',italic:true,bold:false,subscript:true},before=structuredClone(mark);
+ assert.deepEqual(journalPreviewMark(mark,{}),{start:0,end:6,italic:true,bold:false,subscript:true});
+ assert.deepEqual(journalPreviewMark(mark,{normalizeTypography:false}),mark);
+ assert.deepEqual(journalPreviewMark(mark,null),mark);assert.deepEqual(mark,before);
 });

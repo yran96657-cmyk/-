@@ -11,7 +11,7 @@ const now=()=>new Date().toISOString();
 const sleep=(ms,signal)=>new Promise(resolve=>{const finish=()=>{clearTimeout(timer);signal?.removeEventListener('abort',finish);resolve();};const timer=setTimeout(finish,ms);signal?.addEventListener('abort',finish,{once:true});if(signal?.aborted)finish();});
 const recoverable=new Set(['INTERRUPTED','CANCELLED','ASSISTANT_BUSY_RETRY','JOURNAL_WORKER_BUSY_RETRY','MODEL_SERVICE_ERROR','MODEL_SERVICE_UNAVAILABLE','WORKER_INTERRUPTED_RETRY','MODEL_INCOMPLETE_RESPONSE','MODEL_TIMEOUT','PROOF_FAILED','TASK_TIMEOUT']);
 const currentRevision=t=>t.undoneRevision||t.appliedRevision||t.revision;
-const fields=['taskId','projectId','requestId','goal','mode','revision','status','stage','createdAt','updatedAt','finishedAt','attempt','events','planId','changes','model','appliedRevision','undoneRevision','proofId','proof','context','issue','sourceSha256','resultSha256','review'];
+const fields=['taskId','projectId','requestId','goal','mode','revision','status','stage','createdAt','updatedAt','finishedAt','attempt','events','planId','changes','model','preparation','appliedRevision','undoneRevision','proofId','proof','context','issue','sourceSha256','resultSha256','review'];
 function issue(code,message,details){return {code,message,...(details?{details}:{}),retryable:recoverable.has(code)};}
 function taskError(code,message,details){return Object.assign(Error(message||code),{taskIssue:issue(code,message||code,details)});}
 
@@ -55,11 +55,32 @@ export async function createAgentTasks({directory,invoke,pollMs=400,timeoutMs=48
     const context=await invoke(store,'get_project_context',{projectId:t.projectId});
     await invoke(store,'validate_project',{projectId:t.projectId});
     t.context={route:context.route,counts:context.counts,checks:context.checks};
-    if(context.route!=='journal')throw taskError('JOURNAL_TEMPLATE_REQUIRED','先为文稿选择期刊模板，再让 Agent 完成排版与校样。');
+    if(source.document.composition)throw taskError('COMPOSITION_NOT_SUPPORTED','请将自由画布内容整理为文章后生成期刊校样。');
+    if(context.route!=='journal'&&t.mode!=='prepare')throw taskError('JOURNAL_TEMPLATE_REQUIRED','选择“整理为学术期刊”，让 Agent 识别文章结构并生成校样。');
     if(!store.journalRuntime?.capabilities?.enabled)throw taskError('JOURNAL_RUNTIME_UNAVAILABLE','当前服务无法生成期刊 PDF，请检查运行环境。');
-    const blockers=[...documentDiagnostics(source.document).filter(d=>d.severity==='error'),...journalFontProblems(source.document,store.journalRuntime.capabilities.environment?.fonts)];
+    const blockers=t.mode==='prepare'?[]:[...documentDiagnostics(source.document).filter(d=>d.severity==='error'),...journalFontProblems(source.document,store.journalRuntime.capabilities.environment?.fonts)];
     if(blockers.length)throw taskError('SOURCE_PREFLIGHT',`文稿预检发现 ${blockers.length} 项问题：${blockers.slice(0,3).map(d=>d.message).join('；')}`,blockers.slice(0,20));
     await save(t);
+   }
+   checkpoint();
+   if(t.mode==='prepare'&&!t.appliedRevision){
+    await event(t,'plan','识别首面、章节与图表关系');checkpoint();
+    const plan=await invoke(store,'plan_journal_layout',{projectId:t.projectId,profile:'compact-academic'});
+    if(plan.expectedRevision!==t.revision)throw taskError('REVISION_CONFLICT','文稿已更新，请重新下达任务。');
+    const plannedErrors=plan.diagnostics.filter(d=>d.severity==='error');
+    if(plannedErrors.length)throw taskError('SOURCE_PREFLIGHT','文章首面尚不完整，请补充标记的字段后重新执行。',plannedErrors);
+    const dry=await invoke(store,'apply_changes',{projectId:t.projectId,expectedRevision:t.revision,operations:plan.operations,dryRun:true});
+    const blockers=[...documentDiagnostics(dry.document).filter(d=>d.severity==='error'),...journalFontProblems(dry.document,store.journalRuntime.capabilities.environment?.fonts)];
+    if(blockers.length)throw taskError('SOURCE_PREFLIGHT',`文稿预检发现 ${blockers.length} 项问题：${blockers.slice(0,3).map(d=>d.message).join('；')}`,blockers.slice(0,20));
+    t.preparation={profile:'compact-academic',engine:'deterministic-rules',roles:plan.roles,diagnostics:plan.diagnostics,operations:plan.operations.length};
+    const patch=plan.operations.find(o=>o.op==='set_layout').patch;
+    t.changes=Object.entries(patch).filter(([k,v])=>typeof v==='number'&&source.document.layout[k]!==v).map(([field,after])=>({field,before:source.document.layout[field],after}));
+    await event(t,'validate','结构与版面预检通过',`${Object.keys(plan.roles).length} 项首面字段 · ${plan.operations.length} 项整理`);
+    checkpoint();await verify(store,t);await event(t,'committing','应用期刊规范并保存版本');checkpoint();
+    const applied=await invoke(store,'apply_changes',{projectId:t.projectId,expectedRevision:t.revision,operations:plan.operations});
+    t.appliedRevision=applied.revision;const after=await store.get(t.projectId);
+    if(after.revision!==t.appliedRevision)throw taskError('REVISION_CONFLICT','保存后文稿又发生变化，请检查当前版本。');
+    t.resultSha256=hash(after.document);await event(t,'applied','期刊结构已保存',`r${t.revision} → r${t.appliedRevision}`);
    }
    checkpoint();
    if(t.mode==='layout'&&!t.appliedRevision&&!t.noChanges){
@@ -153,8 +174,8 @@ export async function createAgentTasks({directory,invoke,pollMs=400,timeoutMs=48
    try{
     const {t,current}=await load(store,a);if(current.revision!==a.expectedRevision)throw Error('REVISION_CONFLICT');
     if(!publicTask(t,current).actions.undo)throw Error('TASK_NOT_UNDOABLE');await verify(store,t);
-    const undone=await invoke(store,'undo_layout_plan',{projectId:t.projectId,planId:t.planId,expectedRevision:t.appliedRevision});
-    t.undoneRevision=undone.undoneRevision;t.status='undone';delete t.issue;await event(t,'undone','已恢复任务前的版式',`当前 r${t.undoneRevision}`);return publicTask(t,await store.get(a.projectId));
+    const undone=t.mode==='prepare'?await invoke(store,'restore_version',{projectId:t.projectId,expectedRevision:t.appliedRevision,revision:t.revision}):await invoke(store,'undo_layout_plan',{projectId:t.projectId,planId:t.planId,expectedRevision:t.appliedRevision});
+    t.undoneRevision=undone.undoneRevision||undone.revision;t.status='undone';delete t.issue;await event(t,'undone','已恢复任务前的版式',`当前 r${t.undoneRevision}`);return publicTask(t,await store.get(a.projectId));
    }finally{locks.delete(a.taskId);}
   },
   async close(){closing=true;for(const slot of active.values())slot.controller.abort();await Promise.allSettled([...active.values()].map(s=>s.done));}

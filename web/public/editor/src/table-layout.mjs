@@ -25,7 +25,9 @@ export function validateTable(table) {
   if (!Array.isArray(widths) || widths.length !== cols || widths.some(n => !Number.isFinite(n) || n <= 0)) throw Error('列宽必须逐列提供正数。');
   const total = widths.reduce((sum,n) => sum + n,0);
   if (!Number.isFinite(total)) throw Error('列宽总和无效。');
-  return { rows, merges, columnWidths: widths.map(n => n / total * 100) };
+  // Revalidating a saved percentage grid must be byte-stable. Tiny floating
+  // point drift otherwise marks an untouched project dirty and stales proofs.
+  return { rows, merges, columnWidths: Math.abs(total-100)<1e-9?[...widths]:widths.map(n => n / total * 100) };
 }
 
 export function cellMerge(table, row, col) {

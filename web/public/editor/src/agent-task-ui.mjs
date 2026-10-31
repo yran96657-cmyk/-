@@ -2,14 +2,15 @@ const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefine
 const button=(text,fn,cls)=>{const b=el('button',text,cls);b.type='button';b.onclick=fn;return b;};
 const fields={width:'页面宽',height:'页面高',top:'上边距',bottom:'下边距',inner:'内边距',outer:'外边距',fontSize:'字号',lineHeight:'行距',columns:'栏数',gap:'栏距'};
 const value=(field,v)=>String(v)+({fontSize:' pt',lineHeight:' 倍',columns:' 栏'}[field]??' mm');
+const prepareGoal='按 170×240 毫米双栏期刊规范整理首面、章节、图表和参考文献，生成全文 PDF 校样。';
 const names={running:'Agent 正在排版',review:'校样已就绪',needs_attention:'需要你处理',cancelled:'已停止',undone:'已撤销',accepted:'本轮已审阅'};
 const phaseOrder=['inspect','plan','validate','committing','applied','proof','check','review'];
 const errors={AGENT_BUSY_RETRY:'另一个任务正在执行，请稍后再试。',AGENT_RUNTIME_UNAVAILABLE:'当前服务尚未启用 Agent 任务。',REVISION_CONFLICT:'文稿已更新，请重新读取后下达任务。',TASK_NOT_UNDOABLE:'文稿已有后续修改，不能整次撤销。请查看历史版本。',TASK_NOT_RESUMABLE:'这项任务不能直接继续，请查看提示后新建任务。',LOCAL_CHANGED_DURING_OPEN:'读取期间有新输入，已保留你的修改。'};
 export const taskCanWrite=(task,connection)=>!!task&&!connection.dirty&&!connection.writing&&task.projectId===connection.projectId&&task.currentRevision===connection.revision&&!task.stale;
 
-export function setupAgentTasks({panel,connection,getDoc,notify,onState=()=>{}}){
+export function setupAgentTasks({panel,connection,getDoc,notify,locate=()=>{},onState=()=>{}}){
  const api=(name,args={})=>connection.api(name,args);
- let task=null,tasks=[],enabled=false,modelReady=false,busy=false,epoch=0,timer=null,project=connection.projectId,mode='layout',pending=null,observed='',editing=true,localNotice=false;
+ let task=null,tasks=[],enabled=false,modelReady=false,busy=false,epoch=0,timer=null,project=connection.projectId,mode='prepare',pending=null,observed='',editing=true,localNotice=false;
  const storageKey=id=>`shuye-agent-request-${id}`;
  function readPending(id){try{const p=JSON.parse(localStorage.getItem(storageKey(id)));return p?.projectId===id&&p.requestId?p:null;}catch{return null;}}
  function savePending(p){pending=p;try{if(p)localStorage.setItem(storageKey(p.projectId),JSON.stringify(p));else localStorage.removeItem(storageKey(project));}catch{}}
@@ -17,29 +18,35 @@ export function setupAgentTasks({panel,connection,getDoc,notify,onState=()=>{}})
  const history=el('select',undefined,'agent-history');history.setAttribute('aria-label','任务记录');history.hidden=true;
  history.onchange=()=>{task=tasks.find(t=>t.taskId===history.value)||null;editing=false;render();schedule();};
  const form=el('form',undefined,'agent-composer'),intro=el('h3','这份稿件，交给 Agent。');
- const prompt=el('textarea');prompt.rows=4;prompt.maxLength=1200;prompt.placeholder='告诉 Agent 你的版式目标…\n例如：期刊双栏，正文 9 pt，栏距 6 mm';prompt.setAttribute('aria-label','Agent 排版目标');
+ const prompt=el('textarea');prompt.rows=4;prompt.maxLength=1200;prompt.placeholder='告诉 Agent 你的版式目标…\n例如：期刊双栏，正文 9 pt，栏距 6 mm';prompt.setAttribute('aria-label','Agent 排版目标');prompt.value=prepareGoal;
  const recipes=el('div',undefined,'agent-recipes');
- recipes.append(button('期刊双栏',()=>{mode='layout';prompt.value='正文改为双栏，栏距设为6毫米，内外边距都设为15毫米，正文字号设为9pt，正文行距设为1.6倍。其他参数保持不变。';prompt.focus();sync();}),button('检查现有版式',()=>{mode='proof';prompt.value='保留现有版式，生成全文 PDF 校样并检查质量。';prompt.focus();sync();}));
+ recipes.append(button('整理为学术期刊',()=>{mode='prepare';prompt.value=prepareGoal;sync();}),button('自定义版式',()=>{mode='layout';prompt.value='正文改为双栏，栏距设为6毫米，内外边距都设为15毫米，正文字号设为9pt，正文行距设为1.6倍。其他参数保持不变。';prompt.focus();sync();}),button('检查现有版式',()=>{mode='proof';prompt.value='保留现有版式，生成全文 PDF 校样并检查质量。';prompt.focus();sync();}));
  const submit=el('button','执行排版任务','primary agent-submit');submit.type='submit';
  const scope=el('p','自动应用版式、生成校样，可随时停止或撤销。','agent-scope');
  form.append(intro,prompt,recipes,submit,scope);
  const notice=el('p',undefined,'agent-notice');notice.setAttribute('role','status');notice.hidden=true;
+ const recheck=button('保存并重新检查',()=>{mode=task.appliedRevision||task.proof?.status==='complete'?'proof':task.mode;prompt.value=mode==='proof'?'保留现有版式，生成全文 PDF 校样并检查质量。':task.goal;editing=true;render();if(!submit.disabled)form.requestSubmit();},'primary agent-submit');recheck.hidden=true;
  const taskCard=el('section',undefined,'agent-task');taskCard.setAttribute('aria-label','Agent 任务');
- const newTask=button('新任务',()=>{editing=true;mode='layout';prompt.value='';render();prompt.focus();},'agent-new');newTask.hidden=true;
+ const newTask=button('新任务',()=>{editing=true;mode='prepare';prompt.value=prepareGoal;render();prompt.focus();},'agent-new');newTask.hidden=true;
  const retry=button('重新连接',async()=>{await connect();await refresh();}, 'agent-reconnect');retry.hidden=true;
- panel.classList.add('agent-panel');panel.append(top,history,form,notice,taskCard,newTask,retry);
+ panel.classList.add('agent-panel');panel.append(top,history,form,notice,recheck,taskCard,newTask,retry);
  const say=(text,error=false)=>{localNotice=false;notice.textContent=text;notice.hidden=!text;notice.classList.toggle('error',error);};
  function sync(){
-  const supported=!!getDoc().journal&&!getDoc().composition,running=tasks.some(t=>t.status==='running');
+  const supported=!getDoc().composition&&(mode==='prepare'||!!getDoc().journal),running=tasks.some(t=>t.status==='running');
   submit.disabled=busy||running||!enabled||!connection.projectId||!supported||(!pending&&!prompt.value.trim())||(!pending&&mode==='layout'&&!modelReady);
-  submit.textContent=pending?'重新连接已提交的任务':busy?'正在提交…':connection.dirty?'保存并执行任务':mode==='proof'?'生成并检查校样':'执行排版任务';
+  submit.textContent=pending?'重新连接已提交的任务':busy?'正在提交…':connection.dirty?'保存并执行任务':mode==='proof'?'生成并检查校样':mode==='prepare'?'整理并生成校样':'执行排版任务';
   prompt.disabled=!!pending||busy||running;recipes.querySelectorAll('button').forEach(b=>b.disabled=prompt.disabled);
-  scope.textContent=!supported?'完整任务适用于期刊文稿。可在工具中选择期刊模板。':mode==='proof'?'保持版式，生成并检查当前版本的校样。':'自动应用版式、生成校样，可随时停止或撤销。';
+  scope.textContent=!supported?'请先选择“整理为学术期刊”，或切换到文章工程。':mode==='prepare'?'170 × 240 mm · 双栏 · 规范规则自动整理，可整次撤销。':mode==='proof'?'保持版式，生成并检查当前版本的校样。':'自动应用版式、生成校样，可随时停止或撤销。';
   form.hidden=!!task&&!editing&&!pending;
   taskCard.hidden=!task||editing;
   newTask.hidden=!task||editing||running||!!pending;
   for(const b of taskCard.querySelectorAll('[data-write]'))b.disabled=busy||!taskCanWrite(task,connection);
-  if(connection.dirty&&task?.status==='running'){say('你有未保存的修改。可停止 Agent 后接管；新输入会保留在本地。');localNotice=true;}else if(localNotice)say('');
+  const changed=!!task&&(connection.dirty||task.stale||connection.revision!==task.currentRevision);
+  recheck.hidden=editing||!changed||running;recheck.disabled=busy||!enabled||connection.writing;
+  recheck.textContent=connection.dirty?'保存并重新检查':'重新检查当前版本';
+  if(connection.dirty&&task?.status==='running'){say('你有未保存的修改。可停止 Agent 后接管；新输入会保留在本地。');localNotice=true;}
+  else if(changed&&!editing&&!running){say('文稿已有修改。下方是修改前的记录，请重新检查当前版本。');localNotice=true;}
+  else if(localNotice)say('');
   onState(tasks.find(t=>t.status==='running')||task);
  }
  function render(){
@@ -54,12 +61,17 @@ export function setupAgentTasks({panel,connection,getDoc,notify,onState=()=>{}})
   for(const [step,label] of phases){if(task.mode==='proof'&&['plan','applied'].includes(step))continue;const i=phaseOrder.indexOf(step),done=task.status==='review'||i<at||(step==='applied'&&!!task.appliedRevision),current=!done&&i===at;const li=el('li');li.dataset.state=done?'done':current?'active':'pending';if(current&&task.status==='running')li.setAttribute('aria-current','step');li.append(el('span',done?'✓':String(timeline.children.length+1),'agent-step-mark'),el('span',label));timeline.append(li);}
   timeline.hidden=['review','undone','accepted'].includes(task.status);taskCard.append(timeline);
   if(task.changes?.length&&task.status!=='undone'){const details=el('details',undefined,'agent-changes');details.open=task.status!=='running';details.append(el('summary',`${task.changes.length} 项版式调整`));const table=el('table');for(const c of task.changes){const tr=el('tr');tr.append(el('th',fields[c.field]||c.field),el('td',value(c.field,c.before)),el('td','→'),el('td',value(c.field,c.after)));table.append(tr);}details.append(table);taskCard.append(details);}
+  if(task.preparation?.diagnostics?.length&&task.status!=='undone'){
+   const details=el('details',undefined,'agent-changes');details.open=true;details.append(el('summary',`${task.preparation.diagnostics.length} 项需核对`));
+   for(const d of task.preparation.diagnostics){const row=el('p',d.message);if(d.blockId)row.append(button('定位',()=>locate(d.blockId)));details.append(row);}taskCard.append(details);
+  }
   if(task.proof?.status==='complete'&&task.status!=='undone'){
    const proof=el('div',undefined,'agent-proof-summary');proof.append(el('strong',`${task.proof.pages} 页`),el('span',`PDF 校样 · r${task.proof.revision}`));taskCard.append(proof);
-   const notes=task.proof.quality?.diagnostics||[],blocking=notes.filter(d=>d.severity==='error').length;
-   taskCard.append(el('p',blocking?`${blocking} 项质量阻断，查看报告处理。`:task.status==='accepted'?'本轮审阅已记录，修改文稿后需重新出校样。':'机器检查已完成，最终版面由你审阅。','agent-quality'));
+   const notes=task.proof.quality?.diagnostics||[],blocking=notes.filter(d=>d.severity==='error').length,warnings=notes.filter(d=>d.severity==='warning').length;
+   taskCard.append(el('p',blocking?`${blocking} 项质量阻断，查看报告处理。`:task.status==='accepted'?'本轮审阅已记录，修改文稿后需重新出校样。':warnings?`${warnings} 项待核对，查看校样与报告。`:'机器检查已完成，最终版面由你审阅。','agent-quality'));
+   for(const d of notes.filter(d=>d.code==='EDITORIAL_COMMENT_UNRESOLVED')){const row=el('p',d.message,'agent-issue');if(d.blockId)row.append(button('定位',()=>locate(d.blockId)));taskCard.append(row);}
   }
-  if(task.issue)taskCard.append(el('p',task.issue.message,'agent-issue'));
+  if(task.issue){taskCard.append(el('p',task.issue.message,'agent-issue'));if(Array.isArray(task.issue.details)){const issues=el('ul',undefined,'agent-issue-list');for(const d of task.issue.details){const li=el('li',d.message||d.code);if(d.blockId){const jump=button('定位',()=>locate(d.blockId));li.append(jump);}issues.append(li);}taskCard.append(issues);}}
   if(task.stale)taskCard.append(el('p','文稿已有后续版本。此任务与旧版绑定，请新建任务。','agent-issue'));
   const controls=el('div',undefined,'agent-controls');
   if(task.actions.cancel)controls.append(button('停止并接管',()=>act('cancel_agent_task'),'agent-stop'));
@@ -106,11 +118,11 @@ export function setupAgentTasks({panel,connection,getDoc,notify,onState=()=>{}})
  });}
  async function review(){await run(async()=>{const current=task;if(!taskCanWrite(current,connection))throw Error('文稿有新修改，请先处理当前版本。');await connection.journalUI.reviewProof(current.proofId,current.projectId);});}
  async function connect(){
-  const token=epoch;try{const [cap,model]=await Promise.all([api('get_agent_capabilities'),api('get_layout_assistant')]);if(token!==epoch)return;enabled=!!cap.enabled;modelReady=!!model.ready;connectionState.textContent=enabled?(modelReady?'本机就绪':'仅校样可用'):'未启用';connectionState.dataset.state=enabled?'ready':'off';}catch{enabled=false;connectionState.textContent='未连接';retry.hidden=false;}sync();
+  const token=epoch;try{const [cap,model]=await Promise.all([api('get_agent_capabilities'),api('get_layout_assistant')]);if(token!==epoch)return;enabled=!!cap.enabled;modelReady=!!model.ready;connectionState.textContent=enabled?(modelReady?'本机就绪':'规范排版就绪'):'未启用';connectionState.dataset.state=enabled?'ready':'off';}catch{enabled=false;connectionState.textContent='未连接';retry.hidden=false;}sync();
  }
- prompt.addEventListener('input',()=>{if(mode==='proof'&&prompt.value!=='保留现有版式，生成全文 PDF 校样并检查质量。')mode='layout';sync();});
+ prompt.addEventListener('input',()=>{if((mode==='prepare'&&prompt.value!==prepareGoal)||(mode==='proof'&&prompt.value!=='保留现有版式，生成全文 PDF 校样并检查质量。'))mode='layout';sync();});
  prompt.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();if(!submit.disabled)form.requestSubmit();}});
- document.addEventListener('shuye:connection-changed',()=>{if(project!==connection.projectId){project=connection.projectId;epoch++;clearTimeout(timer);task=null;tasks=[];observed='';editing=true;pending=readPending(project);prompt.value=pending?.goal||'';mode=pending?.mode||'layout';say('');render();refresh();connect();}else {sync();if(task&&connection.revision!==task.currentRevision)refresh();}});
+ document.addEventListener('shuye:connection-changed',()=>{if(project!==connection.projectId){project=connection.projectId;epoch++;clearTimeout(timer);task=null;tasks=[];observed='';editing=true;pending=readPending(project);prompt.value=pending?.goal||prepareGoal;mode=pending?.mode||'prepare';say('');render();refresh();connect();}else {sync();if(task&&connection.revision!==task.currentRevision)refresh();}});
  document.addEventListener('shuye:document-changed',sync);
  pending=readPending(project);if(pending){prompt.value=pending.goal;mode=pending.mode;}
  render();connect();refresh();

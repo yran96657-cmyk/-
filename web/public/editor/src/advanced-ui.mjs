@@ -33,9 +33,11 @@ export function setupAdvanced({getDoc,getSelected,change,insert,select,status,re
     }
     if(b.type==='table'){
       const placement=document.createElement('select');for(const [v,t]of [['auto','自动：短表栏内，长表通栏'],['column','栏内整表（不可跨页）'],['full-width','通栏长表（可跨页）']]){const o=document.createElement('option');o.value=v;o.textContent=t;placement.append(o);}placement.value=b.placement||'auto';placement.onchange=()=>mutate(block=>block.placement=placement.value);panel.append(label('PDF 表格位置（编辑预览仅作参考）',placement));
-      const data=document.createElement('textarea');data.rows=10;data.value=b.rows.map(r=>r.join('\t')).join('\n');data.id='tableData';data.spellcheck=false;
+      const hasCellBreaks=b.rows.some(row=>row.some(cell=>/[\t\r\n]/.test(cell)));
+      const data=document.createElement('textarea');data.readOnly=hasCellBreaks;data.rows=10;data.value=b.rows.map(r=>r.join('\t')).join('\n');data.id='tableData';data.spellcheck=false;
       panel.append(label('表格数据（Tab 分列，换行分行）',data));
-      panel.append(button('应用表格数据',()=>{const rows=data.value.replace(/\r/g,'').split('\n').map(r=>r.split('\t'));if(rows.length>5000||rows.some(r=>r.length>50)){status('表格最多 5,000 行、50 列。',true);return;}const width=Math.max(...rows.map(r=>r.length));mutate(block=>block.rows=rows.map(r=>Array.from({length:width},(_,i)=>r[i]||'')));}));
+      const applyData=button('应用表格数据',()=>{if(hasCellBreaks){status('此表含单元格换行或制表符，请使用“编辑表格”逐格修改。',true);return;}const rows=data.value.replace(/\r/g,'').split('\n').map(r=>r.split('\t'));if(rows.length>5000||rows.some(r=>r.length>50)){status('表格最多 5,000 行、50 列。',true);return;}const width=Math.max(...rows.map(r=>r.length));mutate(block=>block.rows=rows.map(r=>Array.from({length:width},(_,i)=>r[i]||'')));});applyData.disabled=hasCellBreaks;panel.append(applyData);
+      if(hasCellBreaks){const hint=document.createElement('p');hint.className='hint';hint.textContent='此表含单元格换行，请使用“编辑表格”。';panel.append(hint);}
       const header=document.createElement('input');header.type='number';header.min=0;header.max=b.rows.length;header.value=b.headerRows??1;header.onchange=()=>mutate(block=>block.headerRows=Math.max(0,Math.min(block.rows.length,Number(header.value)||0)));panel.append(label('重复表头行数',header));
       const style=document.createElement('select');for(const [v,t] of [['grid','网格表'],['three-line','三线表'],['none','无框线']]){const op=document.createElement('option');op.value=v;op.textContent=t;style.append(op);}style.value=b.borderStyle||'grid';style.onchange=()=>mutate(block=>block.borderStyle=style.value);panel.append(label('表格样式',style));
       panel.append(button('增加一行',()=>mutate(block=>block.rows.push(Array(block.rows[0].length).fill('')))));

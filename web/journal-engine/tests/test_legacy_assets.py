@@ -25,6 +25,28 @@ def legacy_doc(raw):
 
 
 class LegacyTests(unittest.TestCase):
+    def test_missing_progid_requires_valid_native_math(self):
+        from xml.etree import ElementTree as ET
+        def change_id(data, value):
+            source=BytesIO(data);output=BytesIO()
+            with ZipFile(source) as z, ZipFile(output,'w') as dest:
+                for name in z.namelist():
+                    raw=z.read(name)
+                    if name=='word/document.xml':
+                        root=ET.fromstring(raw)
+                        for e in root.iter('{urn:schemas-microsoft-com:office:office}OLEObject'):e.set('ProgID',value)
+                        raw=ET.tostring(root)
+                    dest.writestr(name,raw)
+            return output.getvalue()
+        raw=legacy_doc(ole(mtef(char('x'))))
+        result=import_docx(change_id(raw,''))
+        counts=result['importReports'][0]['counts']
+        self.assertEqual((counts['sourceLegacyMath'],counts['importedLegacyMath']),(1,1))
+        for data in [change_id(raw,'Excel.Sheet.12'),change_id(legacy_doc(b'not an equation'),'')]:
+            report=import_docx(data)['importReports'][0]
+            self.assertEqual(report['counts']['importedLegacyMath'],0)
+            self.assertTrue(any(d['code']=='DOCX_OLE_UNSUPPORTED' for d in report['diagnostics']))
+
     def test_nested_native_fraction_script_and_empty_are_lossless(self):
         data=template(11,line(char('a')+template(28,line(),line(char('2')))),line(char('b')))+char('≥',6)+char('0')
         converted=convert_ole(ole(mtef(data)))

@@ -2,7 +2,7 @@ import {mathTokens} from './integrity.mjs';
 import { needsFlow, paginateFlow, applyFlowPart, safeFlowCut, minimumFlowUnit } from './flow-layout.mjs';
 import { buildTableElement, cellDisplayMarks, tableRowGroups, headerRowCount } from './table-layout.mjs';
 import { buildRuby } from './ruby.mjs';
-import {journalPreviewStyle,journalFrontMatter} from './journal-preview.mjs';
+import {journalPreviewStyle,journalFrontMatter,journalPreviewMark} from './journal-preview.mjs';
 const MM = 96 / 25.4;
 export const families = {serif:'SimSun,"Songti SC",serif',sans:'"Microsoft YaHei",sans-serif',kai:'KaiTi,STKaiti,serif'};
 const refs = text => [...text.matchAll(/\[\^([-\w]+)\]/g)].map(m=>m[1]);
@@ -47,7 +47,7 @@ function inline(el,b,l,text,start=0) {
   const cuts=[...boundaries].sort((a,b)=>a-b);
   for(let i=0;i<cuts.length-1;i++) {
     const begin=cuts[i],end=cuts[i+1],str=text.slice(begin,end),span=document.createElement('span');
-    for(const m of b.marks||[])if(m.start<=start+begin&&m.end>start+begin)applyMark(span,m);
+    for(const m of b.marks||[])if(m.start<=start+begin&&m.end>start+begin)applyMark(span,journalPreviewMark(m,l._journal));
     const note=notes.find(n=>n.index===begin&&n[0].length===end-begin);
     if(note) {
       const index=(l._notes||[]).findIndex(n=>n.id===note[1]);
@@ -66,6 +66,7 @@ function inline(el,b,l,text,start=0) {
 }
 export function notesElement(ids,l) {
   const el=document.createElement('div');el.className='page-notes';
+  if(l._journal)Object.assign(el.style,{fontSize:'6.9pt',lineHeight:String(8/6.9)});
   for(const id of ids){const i=l._notes.findIndex(n=>n.id===id);if(i<0)continue;const p=document.createElement('div');p.textContent=`${l._notes[i].marker??i+1}　${l._notes[i].text}`;el.append(p);}
   return el;
 }
@@ -111,14 +112,33 @@ function once(doc,measure,entries) {
   function place(b,text,h,meta={}){pages.at(-1)[col].push({block:b,text,start:0,end:b.text.length,height:h,readOnly:!!b._generated,...meta});used[col]+=h;for(const id of noteIds(text))notes.add(id);noteHeights[noteHeights.length-1]=noteHeight(notes);}
   newPage();
   measure.style.width=`${fullWidth}px`;
-  const front=journalFrontMatter(doc,b=>size(b,b.text,false,{}),height-l.fontSize*96/72*l.lineHeight*2);
+  const front=journalFrontMatter(doc,b=>size(b,b.text,false,{}),height-l.fontSize*96/72*l.lineHeight*2,text=>noteHeight(noteIds(text)));
   measure.style.width=`${width}px`;
   pages[0][0].push(...front.parts);used.fill(front.height);
+  for(const part of front.parts)for(const id of noteIds(part.text))notes.add(id);
+  noteHeights[0]=noteHeight(notes);
   let blocks=doc.blocks.map(b=>['toc','index'].includes(b.type)?{...b,_entries:entries[b.id]||[]}:b);
-  if(front.parts.length)blocks=blocks.slice(front.parts.length);
+  if(front.parts.length){const ids=new Set(front.parts.map(p=>p.block.id));blocks=blocks.filter(b=>!ids.has(b.id));}
   const endnotes=l.notesMode==='endnote'?l._notes:l._notes.filter(n=>longNotes.has(n.id));
   if(endnotes.length){blocks=[...blocks,{id:'_endnotes-title',type:'heading',text:'注释',fontFamily:'sans',level:1,_generated:true},...endnotes.map(n=>({id:`_endnote-${n.id}`,type:'paragraph',text:`${n.marker??l._notes.indexOf(n)+1}　${n.text}`,indent:0,_generated:true}))];if(l.notesMode!=='endnote')warnings.push('超过版心高度 35% 的长注释已移到文末，避免脚注溢出。');}
+  const byId=new Map(blocks.map(b=>[b.id,b])),groupedCaptions=new Set(),figureParts=new Map();
   for(const b of blocks){
+    if(b.type==='image'&&b.captionIds?.length){
+      const captions=b.captionIds.map(id=>byId.get(id)).filter(Boolean);
+      const parts=[b,...captions].map(block=>({block,height:size(block,block.text,false,{})}));
+      const total=parts.reduce((sum,p)=>sum+p.height,0),text=parts.map(p=>p.block.text).join('\n');
+      if(total<=height-noteHeight(noteIds(text))){figureParts.set(b.id,{parts,total,text});captions.forEach(c=>groupedCaptions.add(c.id));}
+      else warnings.push('有图体和题注合计超过版心，请缩小图片或调整题注。');
+    }
+  }
+  for(const b of blocks){
+    if(groupedCaptions.has(b.id))continue;
+    const group=figureParts.get(b.id);
+    if(group){
+      while(!fits(group.total,group.text)&&(used.some(n=>n>0)||notes.size))nextColumn();
+      for(const part of group.parts)place(part.block,part.block.text,part.height);
+      continue;
+    }
     if(b.type==='pageBreak'){newPage();continue;}
     if(['table','toc','index'].includes(b.type)){
       const isTable=b.type==='table',count=isTable?b.rows.length:b._entries.length,header=isTable?headerRowCount(b):{count:0,warnings:[]},headers=header.count;

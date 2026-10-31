@@ -1,8 +1,9 @@
 "use client";
 import {sitePath} from '../public/editor/src/site-path.mjs';
+import {journalFileArguments} from '../public/editor/src/journal-file.mjs';
 import {useState,useEffect,useRef} from 'react';
 import type {CSSProperties} from 'react';
-import {Plus,Search,ArrowUpRight,Archive,LoaderCircle,RotateCcw,Braces,HelpCircle} from 'lucide-react';
+import {Plus,Search,ArrowUpRight,Archive,LoaderCircle,RotateCcw,Braces,HelpCircle,Upload} from 'lucide-react';
 
 type Project={projectId:string,title:string,revision:number,updatedAt:string,blockCount:number,archived:boolean};
 type Tab='projects'|'archive'|'templates'|'agent'|'guide';
@@ -46,6 +47,15 @@ function when(iso:string){
 const titleSize=(t:string)=>t.length>28?' is-long':t.length>14?' is-mid':'';
 
 export default function Dashboard({user}:{user:string|null}){
+  const importRef=useRef<HTMLInputElement>(null),importingRef=useRef(false);
+  const [importing,setImporting]=useState(false);
+  async function importWord(file?:File){
+    if(!file||importingRef.current)return;
+    importingRef.current=true;setImporting(true);setError('');
+    try{const args=await journalFileArguments(file),projectId='journal-'+crypto.randomUUID();await api('import_journal_docx',{projectId,...args});location.href=sitePath('/editor/index.html?project=')+projectId;}
+    catch(e:any){setError(e.message);}
+    finally{importingRef.current=false;setImporting(false);}
+  }
   const [agentTasks,setAgentTasks]=useState<AgentTask[]>([]),[agentAvailable,setAgentAvailable]=useState<boolean|null>(null),[agentError,setAgentError]=useState('');
   const [projects,setProjects]=useState<Project[]>([]),[tab,setTabState]=useState<Tab>('projects'),[search,setSearch]=useState(''),[loading,setLoading]=useState(true),[error,setError]=useState(''),[creating,setCreating]=useState(false),[modal,setModal]=useState(false),[title,setTitle]=useState(''),[template,setTemplate]=useState('book'),[pending,setPending]=useState('');
   async function load(quiet=false){if(!quiet)setLoading(true);try{if(user)setProjects((await api('list_projects')).projects);}catch(e:any){setError(e.message);}finally{setLoading(false);}}
@@ -118,9 +128,10 @@ export default function Dashboard({user}:{user:string|null}){
             <button type="button" aria-pressed={tab==='archive'} onClick={()=>setTab('archive')}>归档<b>{archived.length}</b></button>
           </div>
           <label className="search"><Search size={15} aria-hidden="true"/><input ref={searchRef} type="search" aria-label="搜索项目" placeholder="搜索" value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'&&search){e.preventDefault();setSearch('');}}}/>{!search&&<kbd aria-hidden="true">/</kbd>}</label>
-          {tab==='projects'&&<button type="button" className="primary" onClick={newProject}><Plus size={15}/>新建项目</button>}
+          {tab==='projects'&&<><input ref={importRef} type="file" accept=".doc,.docx" hidden onChange={e=>{const file=e.target.files?.[0];e.target.value='';void importWord(file);}}/><button type="button" disabled={importing} aria-busy={importing||undefined} onClick={()=>user?importRef.current?.click():signIn()}>{importing?<LoaderCircle className="spin" size={15}/>:<Upload size={15}/>}导入 Word</button><button type="button" className="primary" disabled={importing} onClick={newProject}><Plus size={15}/>新建项目</button></>}
         </div>
         {notice}
+        {importing&&<p role="status" className="notice">正在导入原稿并核对公式、图表与文字，请保留此页面。</p>}
         {loading?<div className="shelf" aria-hidden="true">{[0,1,2,3,4].map(i=><div className="volume" key={i}><div className="volume-ghost"/><div className="volume-meta"><span className="ghost-line"/></div></div>)}</div>
         :visible.length?<div className="shelf" role="list">{visible.map(p=><article className={'volume'+(p.archived?' is-archived':'')} role="listitem" key={p.projectId}>
             <a className="volume-cover" href={sitePath('/editor/index.html?project=')+p.projectId} aria-label={'打开 '+p.title}>

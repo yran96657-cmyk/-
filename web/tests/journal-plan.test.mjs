@@ -55,3 +55,37 @@ test('figure anchors distinguish spaced body references from unbound captions',(
   const ambiguous=structuredClone(doc);delete ambiguous.blocks[1].anchor;assert.deepEqual(missing(ambiguous),['body']);
  }
 });
+
+
+test('compact profile matches journal geometry and remains stable after repeated validation',()=>{
+ const doc=checkDocument({format:'open-typesetter',version:4,blocks:[{id:'t',type:'table',rows:[['first','second','third'],['A','B','C']],columnWidths:[33.3333333333,33.3333333333,33.3333333334]}]});
+ const plan=journalPlan(doc,{profile:'compact-academic'}),result=applyOperations(doc,plan.operations).document;
+ assert.deepEqual([result.layout.width,result.layout.height,result.layout.columns,result.layout.fontSize],[170,240,2,8]);
+ assert.deepEqual(checkDocument(result),result);
+ assert.deepEqual(checkDocument(checkDocument(result)),result);
+ assert.deepEqual(result.blocks[0].rows,doc.blocks[0].rows);
+});
+
+test('compact profile numbers only wholly unnumbered articles and locates uncertain metadata',()=>{
+ const doc=checkDocument({format:'open-typesetter',version:4,blocks:[{id:'stray',type:'paragraph',text:'unclassified fragment'},{id:'cite',type:'paragraph',text:'Test[J]. XX(X): X-X.'},{id:'eq',type:'equation',text:'x=1'}]});
+ const plan=journalPlan(doc,{profile:'compact-academic'}),result=applyOperations(doc,plan.operations).document;
+ assert.equal(result.blocks[2].equationNumber,'1');assert.equal(result.blocks[2].text,'x=1');
+ assert.ok(plan.diagnostics.some(d=>d.code==='UNCLASSIFIED_PREFIX'&&d.blockId==='stray'));
+ assert.ok(plan.diagnostics.some(d=>d.code==='PUBLICATION_METADATA_PLACEHOLDER'&&d.blockId==='cite'));
+ doc.blocks[2].equationNumber='A.1';assert.equal(applyOperations(doc,journalPlan(doc,{profile:'compact-academic'}).operations).document.blocks[2].equationNumber,'A.1');
+});
+
+test('full width figures are constrained against the full measure for 300 DPI',()=>{
+ const png=Buffer.alloc(24);png[0]=137;png[1]=80;png.writeUInt32BE(900,16);png.writeUInt32BE(600,20);
+ const doc=checkDocument({format:'open-typesetter',version:4,blocks:[{id:'img',type:'image',placement:'full-width',width:100,src:'data:image/png;base64,'+png.toString('base64')}]});
+ const result=applyOperations(doc,journalPlan(doc,{profile:'compact-academic'}).operations).document;
+ assert.ok(result.blocks[0].width<53);assert.ok(900/((144*result.blocks[0].width/100)/25.4)>=300);
+});
+
+test('caption-bound auto figures use full measure without overriding explicit human placement',()=>{
+ const png=Buffer.alloc(24);png[0]=137;png[1]=80;png.writeUInt32BE(1000,16);png.writeUInt32BE(900,20);
+ const source=checkDocument({format:'open-typesetter',version:4,blocks:[{id:'img',type:'image',width:80,src:'data:image/png;base64,'+png.toString('base64'),captionIds:['c']},{id:'c',type:'paragraph',text:'图1 实验'}]});
+ const prepared=applyOperations(source,journalPlan(source,{profile:'compact-academic'}).operations).document;
+ assert.equal(prepared.blocks[0].placement,'full-width');assert.ok(prepared.blocks[0].width*144/100<=1000/300*25.4);assert.equal(prepared.blocks[0].src,source.blocks[0].src);
+ source.blocks[0].placement='column';const manual=applyOperations(source,journalPlan(source,{profile:'compact-academic'}).operations).document;assert.equal(manual.blocks[0].placement,'column');
+});

@@ -71,6 +71,9 @@ def inspect_output(output, document=None, compilation=None):
         canonical=json.dumps(document,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')
         report['renderedDocumentSha256']=hashlib.sha256(canonical).hexdigest()
     diagnostics=[dict(d,sourceSha256=r['sourceSha256']) for r in document.get('importReports',[]) for d in r['diagnostics']]
+    diagnostics[:0]=[{'code':'EDITORIAL_COMMENT_UNRESOLVED','severity':'warning','message':c['text'],'blockId':c.get('blockId'),'commentId':c['id']} for c in document.get('comments',[]) if not c.get('resolved')]
+    if not missing_figures(document) and any(b.get('type')=='image' for b in document.get('blocks',[])):
+        diagnostics=[dict(d,severity='info',message='原稿未嵌入图体；当前图题已关联图件，请核对图件来源与清晰度。') if d['code']=='DOCX_FIGURE_CONTENT_MISSING' else d for d in diagnostics]
     diagnostics.extend(report['geometry']['outside'])
     diagnostics.extend(report.get('semanticLayout',{}).get('diagnostics',[]))
     diagnostics.extend(report['compileDiagnostics'])
@@ -101,12 +104,16 @@ def inspect_output(output, document=None, compilation=None):
     if document.get('journal'):
         required=['title-zh','authors-zh','affiliation-zh','abstract-zh','keywords-zh','title-en','authors-en','affiliation-en','abstract-en','keywords-en']
         diagnostics.extend({'code':'JOURNAL_FIELD_MISSING','severity':'error','message':'首面缺少字段：'+role} for role in required if not any(b.get('role')==role and str(b.get('text','')).strip() for b in document.get('blocks',[])))
-        diagnostics.extend({'code':'JOURNAL_METADATA_REVIEW','severity':'warning','message':'出版字段待编辑确认：'+key} for key in ('name','nameEn','volume','issue','year','date','dateEn') if not str(document['journal'].get(key,'')).strip())
+        metadata_names={'name':'中文刊名','nameEn':'英文刊名','volume':'卷号','issue':'期号','year':'出版年','date':'中文出版日期','dateEn':'英文出版日期'}
+        diagnostics.extend({'code':'JOURNAL_METADATA_REVIEW','severity':'warning','field':key,'message':'请补全'+label} for key,label in metadata_names.items() if not str(document['journal'].get(key,'')).strip())
         import re
         diagnostics.extend(dict(d,message='图题未关联图件；请补充原图或显式设置 captionIds，不能把有图题无图的稿件作为完整校样。') for d in missing_figures(document))
         blocks=document.get('blocks',[])
+        first_front=next((i for i,b in enumerate(blocks) if b.get('role') in required+['citation','classification']),0)
+        diagnostics.extend({'code':'UNCLASSIFIED_PREFIX','severity':'warning','blockId':b['id'],'message':'首面前有未归类文字，请核对是否属于文章正文。'} for b in blocks[:first_front] if str(b.get('text','')).strip())
         for b in blocks:
-
+            if b.get('role') in ('citation','classification') and re.search(r'(?:X\s*[-—(（:]|[（(]X|X{2,})',b.get('text',''),re.I):
+                diagnostics.append({'code':'PUBLICATION_METADATA_PLACEHOLDER','severity':'warning','blockId':b['id'],'message':'卷期、页码或文章编号仍有占位符，请按本期信息核对。'})
             if b.get('role')=='classification' and re.search(r'文章编号\s*[:：]\s*$',b.get('text','')):
                 diagnostics.append({'code':'JOURNAL_METADATA_REVIEW','severity':'warning','message':'原稿文章编号为空，需编辑补全；系统未编造编号。','blockId':b['id']})
     for warning in report['layoutWarnings']:

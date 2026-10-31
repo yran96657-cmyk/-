@@ -1,6 +1,8 @@
 import {documentFingerprint} from './project-sync.mjs';
 import {showJournalReport} from './journal-report-ui.mjs';
 import {ProofSession} from './proof-session.mjs';
+import {figureDiagnostics} from './figure-audit.mjs';
+import {journalFileArguments} from './journal-file.mjs';
 
 export function setupJournalCloud({api,connection,getDoc,button,status}){
  const saveFile=(name,data,type)=>{const url=URL.createObjectURL(new Blob([data],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};
@@ -19,17 +21,19 @@ export function setupJournalCloud({api,connection,getDoc,button,status}){
   const file=picker.files[0];picker.value='';if(!file||importing)return;
   importing=true;const before=documentFingerprint(getDoc()),previousProject=connection.projectId;
   try{
-   if(file.size>20*1024*1024)throw Error('DOCX 不得超过 20 MB');
    status('正在导入完整期刊稿件并核对公式、表格与编号…');
-   const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-   const projectId='journal-'+crypto.randomUUID(),r=await api('import_journal_docx',{projectId,title:file.name.replace(/\.docx?$/i,''),base64:btoa(binary),revisionPolicy:revisionPolicy.value||'require-clean'});
+   const args=await journalFileArguments(file,revisionPolicy.value||'require-clean');
+   const projectId='journal-'+crypto.randomUUID(),r=await api('import_journal_docx',{projectId,...args});
    if(connection.projectId!==previousProject||documentFingerprint(getDoc())!==before){status('期刊工程已保存到项目库。导入期间的新输入仍保留，请从项目库打开新工程。');return;}
    if(await connection.open(projectId)===false){status('期刊工程已保存到项目库。当前打开操作已被其他工程操作取代，请从项目库打开新工程。');return;}
    history.replaceState(null,'','?project='+projectId);
    const report=r.document.importReports[0],counts=report.counts;
    const errors=report.diagnostics?.filter(d=>d.severity==='error').length||0;
+   const missing=figureDiagnostics({...r.document,blocks:r.document.blocks||[]}).filter(d=>d.severity==='error').length;
    const legacy=counts.sourceLegacyMath?`（含 ${counts.sourceLegacyMath} 个旧式公式）`:'';
-   status(`已导入 ${counts.importedMath}/${counts.sourceMath} 个数学区${legacy}、${counts.importedImages}/${counts.sourceImages??'未知'} 张图。`+(errors?`有 ${errors} 项导入阻断，须修复后再交付；请查看预检报告。`:'请在“期刊模板”和右侧“期刊角色”指定首面字段。'),!!errors);
+   const message=`已导入 ${counts.importedMath}/${counts.sourceMath} 个数学区${legacy}、${counts.importedImages}/${counts.sourceImages??'未知'} 张图。`+(missing?`缺少 ${missing} 张图体，请在纸面上方逐一补图。`:'可交给 Agent 整理为学术期刊。')+(errors?`另有 ${errors} 项导入阻断，请查看预检报告。`:'');
+   status(message,!!(errors||missing));
+   document.dispatchEvent(new CustomEvent('shuye:notice',{detail:{message,tone:errors?'error':'info'}}));
   }catch(e){status(e.message,true);}finally{importing=false;}
  };
  button('自动排版期刊',async()=>{
@@ -73,7 +77,9 @@ export function setupJournalCloud({api,connection,getDoc,button,status}){
     try{await checkCurrent();if(tab)tab.location.replace(url);else saveFile(`${title}-全文校样.pdf`,bytes,'application/pdf');}catch(e){tab?.close();throw e;}
    },
    downloadPdf:async()=>{await checkCurrent();saveFile(`${title}-全文校样.pdf`,bytes,'application/pdf');},
-   downloadReport:async()=>{await checkCurrent();saveFile(`${title}-校样报告.json`,JSON.stringify(result,null,2),'application/json');}
+   downloadReport:async()=>{await checkCurrent();saveFile(`${title}-校样报告.json`,JSON.stringify(result,null,2),'application/json');},
+   editJournal:()=>document.dispatchEvent(new Event('shuye:edit-journal')),
+   locateBlock:blockId=>document.dispatchEvent(new CustomEvent('shuye:locate-block',{detail:{blockId}}))
   });
   dialog.addEventListener('close',()=>setTimeout(()=>URL.revokeObjectURL(url),60000),{once:true});
   return result;
