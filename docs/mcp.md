@@ -2,7 +2,7 @@
 
 ## 在线期刊排版（0.7.0）
 
-在线服务端提供 98 个工具，包括 DOC/DOCX、OMML/MathType 导入、排版方案、
+在线服务端工具目录以 `tools/list` 为准，包括 DOC/DOCX、OMML/MathType 导入、排版方案、
 章节、图表、脚注、真实 PDF 校样与逐页坐标检查。它与下面的旧版离线 44 工具
 服务是两种后端；旧 ChatGPT Sites 连接也不会自动变成 inkq.online 上的服务。
 
@@ -170,3 +170,5 @@ node scripts/mcp-demo.mjs --workspace C:/books/shuye-workspace --pdf
 
 `set_journal` 保存首面模板；图表的 `anchor`、`captionIds`、公式的 `equationNumber` 和段落 `role` 均通过现有事务修改。`get_proof_page` 增加当前页的 `objects` 与 `objectTotal`，其分页独立于文字行数；取全量时按两者较大值继续分页。`semanticLayout` 的点位为语义起止位置，不是墨迹框。字段、复现命令和边界见 [期刊 v4 实稿记录](journal-pilot-v4.md)。
 
+
+普通 API 模型可通过内置 Agent 循环使用同一 MCP 工具；连接器与批量排版说明见 [API Agent](api-agent.md)。

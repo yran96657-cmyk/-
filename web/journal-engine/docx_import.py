@@ -22,12 +22,12 @@ def utf16(s): return len(s.encode('utf-16-le'))//2
 def import_docx(data,revision_policy='require-clean'):
     if len(data)>20*1024*1024: raise ValueError('DOCX 不得超过 20 MB。')
     if data.startswith(bytes.fromhex('d0cf11e0a1b11ae1')):
-        from word_compat import legacy_docx
+        from word_compat import legacy_docx,legacy_converter
         result=import_docx(legacy_docx(data),revision_policy)
         report=result['importReports'][0]
         converted_hash=report['sourceSha256'];report['sourceSha256']=hashlib.sha256(data).hexdigest();report['sourceBytes']=len(data)
         report['counts']['convertedLegacyDoc']=1
-        report['diagnostics'].append({'code':'LEGACY_DOC_CONVERTED','severity':'warning','message':'DOC 经隔离 LibreOffice 转为 DOCX；转换中间件 SHA-256：'+converted_hash+'。原稿摘要保持不变。'})
+        report['diagnostics'].append({'code':'LEGACY_DOC_CONVERTED','severity':'warning','message':'DOC 经 '+legacy_converter()+' 转为 DOCX；转换中间件 SHA-256：'+converted_hash+'。原稿摘要保持不变；转换未执行宏，仍须校对。'})
         return result
     warnings = ['Word 导入保留可支持的内容结构；原分页、字体替代、浮动定位和复杂表格需核对。']
     with ZipFile(BytesIO(data)) as z:
@@ -75,6 +75,16 @@ def import_docx(data,revision_policy='require-clean'):
         styles=xml(z.read('word/styles.xml')) if 'word/styles.xml' in z.namelist() else None
         numbering=Numbering(xml(z.read('word/numbering.xml')) if 'word/numbering.xml' in z.namelist() else None,styles,warnings)
         character_styles={s.get(W+'styleId'):s for s in (styles if styles is not None else []) if s.get(W+'type')=='character'}
+        def character_properties(props):
+            chain=[props] if props is not None else [];seen=set();name=val(props,'rStyle','')
+            while name and name not in seen:
+                seen.add(name);style=character_styles.get(name)
+                if style is None:name='';break
+                inherited=style.find(W+'rPr')
+                if inherited is not None:chain.append(inherited)
+                name=val(style,'basedOn','')
+            if name in seen:warnings.append('字符样式继承存在循环，须核对样式。')
+            return chain
         def vertical_alignment(props):
             seen=set()
             while props is not None:
@@ -181,18 +191,22 @@ def import_docx(data,revision_policy='require-clean'):
                         if c.tag!=W+'rPr': visit(c)
                     mark={'start':start,'end':utf16(text)}
                     if props is not None:
+                        chain=character_properties(props)
                         for key,tag in [('bold','b'),('italic','i'),('underline','u')]:
-                            el=props.find('w:'+tag,NS)
-                            if el is not None and el.get(W+'val') not in ('0','false','none'): mark[key]=True
+                            el=next((p.find(W+tag) for p in chain if p.find(W+tag) is not None),None)
+                            if el is not None:mark[key]=el.get(W+'val') not in ('0','false','off','none')
                         va=vertical_alignment(props)
                         if va in ('superscript','subscript'): mark[va]=True
-                        size=props.find('w:sz',NS)
+                        size=next((p.find(W+'sz') for p in chain if p.find(W+'sz') is not None),None)
                         if size is not None:
                             try: mark['fontSize']=max(5,min(72,float(size.get(W+'val'))/2))
                             except (TypeError,ValueError): pass
-                        fonts=props.find('w:rFonts',NS)
-                        if fonts is not None:
-                            name=fonts.get(W+'eastAsia',fonts.get(W+'ascii','')).lower()
+                        names={}
+                        for p in reversed(chain):
+                            fonts=p.find(W+'rFonts')
+                            if fonts is not None:names.update(fonts.attrib)
+                        if names.get(W+'eastAsia') or names.get(W+'ascii'):
+                            name=names.get(W+'eastAsia',names.get(W+'ascii','')).lower()
                             mark['fontFamily']='kai' if 'kai' in name or '楷' in name else 'sans' if any(x in name for x in ['hei','黑','arial']) else 'serif'
                     if len(mark)>2 and mark['end']>start: marks.append(mark)
                     return

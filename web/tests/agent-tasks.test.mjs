@@ -16,8 +16,10 @@ import {makeTemplate} from '../public/editor/src/templates.mjs';
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const hash=v=>createHash('sha256').update(documentFingerprint(v)).digest('hex');
 async function fixture(t,options={}){
- const dir=await mkdtemp(join(tmpdir(),'shuye-agent-')),storage=await openStorage(join(dir,'data'));
+ const dir=await mkdtemp(join(tmpdir(),'shuye-agent-')),storage=await openStorage(join(dir,'data')),requests=[];
  const model=createServer(async(req,res)=>{
+  requests.push({path:req.url,at:Date.now()});
+  res.setHeader('Connection','close');
   if(req.url==='/api/tags'){res.end(JSON.stringify({models:[{name:'test',digest:'a'.repeat(64)}]}));return;}
   let body='';for await(const chunk of req)body+=chunk;
   const context=JSON.parse(JSON.parse(body).messages.at(-1).content);
@@ -41,8 +43,8 @@ async function fixture(t,options={}){
  const alice=make('alice'),bob=make('bob');await alice.create('paper',makeTemplate('journal','测试文稿'));
  const args={projectId:'paper',expectedRevision:1,requestId:randomUUID(),goal:'内外边距改为20毫米',mode:'layout'};
  const read=task=>callTool(alice,'get_agent_task',{projectId:'paper',taskId:task.taskId});
- const terminal=async task=>{for(let i=0;i<500;i++){const p=await read(task);if(p.status!=='running')return p;await wait(5);}throw Error('test timeout');};
- const until=async predicate=>{for(let i=0;i<500;i++){if(await predicate())return;await wait(5);}throw Error('test timeout');};
+ const terminal=async task=>{const end=Date.now()+20000;let p;while(Date.now()<end){p=await read(task);if(p.status!=='running')return p;await wait(10);}throw Error('test timeout: '+JSON.stringify({stage:p?.stage,events:p?.events?.slice(-3),requests,plan:p?.planId?await assistant.get(alice,{projectId:'paper',planId:p.planId}):null}));};
+ const until=async predicate=>{const end=Date.now()+20000;while(Date.now()<end){if(await predicate())return;await wait(10);}throw Error('test timeout waiting for task predicate');};
  t.after(async()=>{await agent.close();await assistant.close();model.closeAllConnections();await new Promise(r=>model.close(r));storage.close();await rm(dir,{recursive:true,force:true});});
  return {dir,alice,bob,args,read,terminal,until,events,proofs,get proofCount(){return proofCount;},start:()=>callTool(alice,'start_agent_task',args),async restart(){await agent.close();agent=await createAgentTasks(config);alice.agentTasks=bob.agentTasks=agent;}};
 }

@@ -293,7 +293,18 @@ def build_tex(doc,assets_dir,math_widths=None):
     if journal and journal.get('latinFont')=='times':pre+=r'\setmainfont{Times New Roman}'+'\n'
     # Fandol lacks some traditional Chinese characters. Prefer installed open
     # fonts as fallbacks; never replace the source character with a lookalike.
-    pre+=r'\IfFontExistsTF{Noto Serif CJK SC}{\xeCJKsetup{AutoFallBack=true}\setCJKfallbackfamilyfont{\CJKrmdefault}{Noto Serif CJK SC}\setCJKfallbackfamilyfont{\CJKsfdefault}{Noto Sans CJK SC}}{}'+'\n'
+    fallback_dir=os.environ.get('SHUYE_NOTO_FONT_DIR')
+    if fallback_dir:
+        # An administrator can supply the same open fonts as the Linux server
+        # without installing fonts globally on a desktop test/connector host.
+        fallback_dir=Path(fallback_dir).resolve()
+        if any(c in fallback_dir.as_posix() for c in '{}%#\\\n\r'):raise ValueError('Invalid fallback font path')
+        for family,tex_family in [('Serif',r'\CJKrmdefault'),('Sans',r'\CJKsfdefault')]:
+            font=fallback_dir/f'Noto{family}CJKsc-Regular.otf'
+            if not font.is_file():raise ValueError('Missing configured Noto fallback font: '+font.name)
+            pre+=r'\xeCJKsetup{AutoFallBack=true}\setCJKfallbackfamilyfont{'+tex_family+'}[Path={'+fallback_dir.as_posix()+'/}]{'+font.name+'}\n'
+    else:
+        pre+=r'\IfFontExistsTF{Noto Serif CJK SC}{\xeCJKsetup{AutoFallBack=true}\setCJKfallbackfamilyfont{\CJKrmdefault}{Noto Serif CJK SC}\setCJKfallbackfamilyfont{\CJKsfdefault}{Noto Sans CJK SC}}{}'+'\n'
     # FreeSerif is part of the Linux runtime. macOS/Windows may instead have
     # Times New Roman: use its real upright Greek glyphs before falling back
     # to the selected text face (whose missing glyphs remain a hard error).
@@ -337,7 +348,7 @@ def build_tex(doc,assets_dir,math_widths=None):
         # The normalized book footer is also a placeholder. Journals already
         # carry their folio in the running head; do not duplicate it below.
 
-        if any(key in layout and layout[key]!='{page}' for key in ('footer','footerEven')):
+        if layout.get('footerMode')=='custom' or overrides or any(key in layout and layout[key]!='{page}' for key in ('footer','footerEven')):
             overrides+=r'\fancyfoot{}\fancyfoot[LE]{'+footer(layout.get('footerEven',layout.get('footer','')))+r'}\fancyfoot[RO]{'+footer(layout.get('footer',''))+'}'
         pre+=overrides+'\n'
         left=r'\strut '+('第'+volume+'卷' if volume else '')+('第'+issue+'期' if issue else '')+r'\\ '+escape(journal.get('date',''))
@@ -472,16 +483,17 @@ def build_tex(doc,assets_dir,math_widths=None):
         if typ in ('paragraph','heading'):
             if journal and role in ROLE_STYLE:
                 size,leading,alignment,bold=ROLE_STYLE[role]
-                custom=journal.get('roleStyles',{}).get(role,{})
+                custom={**journal.get('roleStyles',{}).get(role,{}),**b.get('journalStyle',{})}
                 render_source=b
-                size=number(custom.get('fontSize'),size,6,24);leading=number(custom.get('leading'),leading,7,36)
+                size=number(custom.get('fontSize'),size,5,72);leading=number(custom.get('leading'),max(leading,size*1.2),7,90)
+                alignment=custom.get('align',alignment)
                 if 'bold' in custom:
                     if not isinstance(custom['bold'],bool):raise ValueError('角色字重无效。')
                     bold=custom['bold'];render_source={**b,'marks':[{k:v for k,v in m.items() if k!='bold'} for m in b.get('marks',[])]}
                 family=custom.get('fontFamily','serif')
-                if family not in ('serif','sans'):raise ValueError('角色字体无效。')
-                family_cmd=r'\sffamily ' if family=='sans' else ''
-                align_cmd={'center':r'\centering ','left':r'\raggedright ','justify':''}[alignment]
+                if family not in ('serif','sans','kai'):raise ValueError('角色字体无效。')
+                family_cmd=r'\sffamily ' if family=='sans' else r'\kaifamily ' if family=='kai' else ''
+                align_cmd={'center':r'\centering ','left':r'\raggedright ','right':r'\raggedleft ','justify':''}[alignment]
                 indent=r'\setlength{\parindent}{13.8pt}' if role in ('abstract-zh','keywords-zh','abstract-en','keywords-en') else r'\setlength{\parindent}{0pt}'
                 if role in ('abstract-zh','keywords-zh'):indent+=r'\leftskip=16pt '
                 before=number(custom.get('spaceBefore'),4 if role.startswith('title') else 0,0,36)

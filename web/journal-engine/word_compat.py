@@ -17,7 +17,29 @@ O='{urn:schemas-microsoft-com:office:office}'
 V='{urn:schemas-microsoft-com:vml}'
 M='{http://schemas.openxmlformats.org/officeDocument/2006/math}'
 
+def legacy_converter():
+    return 'Microsoft Word' if os.name=='nt' else 'LibreOffice'
+
+def check_legacy_converter(data,converter):
+    # WPS-generated binary DOC can lose entire italic runs in Writer without
+    # emitting any conversion error. Require the native reader in this case.
+    import olefile
+    with olefile.OleFileIO(BytesIO(data)) as compound:
+        if compound.exists('WpsCustomData') and converter!='Microsoft Word':
+            raise ValueError('WORD_DOC_NATIVE_REQUIRED: WPS binary DOC requires Microsoft Word conversion; save a DOCX with Word or import through the Windows engine. LibreOffice conversion can omit italic text.')
+
 def legacy_docx(data):
+    converter=legacy_converter();check_legacy_converter(data,converter)
+    if converter=='Microsoft Word':
+        exe=shutil.which('pwsh') or shutil.which('powershell')
+        if not exe:raise ValueError('WORD_DOC_RUNTIME_UNAVAILABLE: Microsoft Word and PowerShell required')
+        with tempfile.TemporaryDirectory(prefix='shuye-word-') as tmp:
+            source=Path(tmp)/'source.doc';target=Path(tmp)/'source.docx';source.write_bytes(data)
+            done=subprocess.run([exe,'-NoProfile','-NonInteractive','-File',str(Path(__file__).with_name('word_convert.ps1')),
+                                 '-Source',str(source),'-Target',str(target)],capture_output=True,timeout=90)
+            if done.returncode or not target.exists():raise ValueError('WORD_DOC_NATIVE_FAILED: Microsoft Word conversion failed; original document unchanged')
+            if target.stat().st_size>20*1024*1024:raise ValueError('Converted DOCX exceeds 20 MB')
+            return target.read_bytes()
     exe=shutil.which('soffice') or shutil.which('libreoffice')
     if not exe:raise ValueError('WORD_DOC_RUNTIME_UNAVAILABLE: install LibreOffice Writer')
     with tempfile.TemporaryDirectory(prefix='shuye-doc-') as tmp:

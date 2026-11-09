@@ -1,6 +1,7 @@
 import {createJournalRuntime} from './journal-runtime.mjs';
 import {createAgentTasks} from './agent-tasks.mjs';
-import {callTool} from '../lib/cloud-tools.mjs';
+import {callTool,toolList} from '../lib/cloud-tools.mjs';
+import {createModelBroker} from './api-model.mjs';
 import {createLayoutAssistant} from './layout-assistant.mjs';
 import {createServer} from 'node:http';
 import {readFile,stat} from 'node:fs/promises';
@@ -12,7 +13,7 @@ import {openStorage} from './storage.mjs';
 import {hash,secret,passwordHash,verify,identity} from './auth.mjs';
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf','.wasm':'application/wasm','.json':'application/json'};
-export async function startServer({directory,publicDirectory,origin,basePath='/shuye',port=8789,bootstrapPassword,journal,assistant,host='127.0.0.1'}={}){
+export async function startServer({directory,publicDirectory,origin,basePath='/shuye',port=8789,bootstrapPassword,journal,assistant,apiAgent,host='127.0.0.1'}={}){
  if(!/^\/[a-zA-Z0-9_-]+$/.test(basePath))throw Error('INVALID_BASE_PATH');
  const site=new URL(origin);if(!['http:','https:'].includes(site.protocol)||site.pathname!=='/')throw Error('INVALID_ORIGIN');
  const store=await openStorage(directory),sql=store.sql,root=resolve(publicDirectory),secure=site.protocol==='https:';
@@ -22,7 +23,8 @@ export async function startServer({directory,publicDirectory,origin,basePath='/s
  }
  if(journal)store.JOURNAL_RUNTIME=await createJournalRuntime({engineDirectory:fileURLToPath(new URL(typeof SHUYE_BUNDLED_JOURNAL_PATH==='string'?SHUYE_BUNDLED_JOURNAL_PATH:'../journal-engine/',import.meta.url)),...journal,directory:resolve(directory,'journal-proofs')});
  if(assistant)store.LAYOUT_ASSISTANT=await createLayoutAssistant({...assistant,directory:resolve(directory,'layout-plans')});
- if(journal)store.AGENT_TASKS=await createAgentTasks({directory:resolve(directory,'agent-tasks'),invoke:callTool});
+ if(apiAgent)store.API_MODELS=createModelBroker(apiAgent);
+ if(journal)store.AGENT_TASKS=await createAgentTasks({directory:resolve(directory,'agent-tasks'),invoke:callTool,tools:toolList()});
  const attempts=new Map();let activeApi=0;
  const cookie=(token,age=604800)=>`shuye_session=${token}; Path=${basePath}/; HttpOnly; SameSite=Strict; Max-Age=${age}${secure?'; Secure':''}`;
  const brand=`<a class="auth-brand" href="${basePath}/" aria-label="书页 · 项目库"><svg viewBox="0 0 48 48" width="36" height="36" aria-hidden="true" focusable="false"><use href="${basePath}/brand/shuye-mark.svg#mark"/></svg><span>书页</span></a>`;
@@ -45,7 +47,7 @@ export async function startServer({directory,publicDirectory,origin,basePath='/s
    if(req.method==='POST'&&!bearer&&req.headers.origin!==site.origin){json(403,{error:'ORIGIN_REQUIRED'});return;}
    let data;
    const body=async(limit=30*1024*1024)=>{if(data)return data;let n=0,chunks=[];for await(const c of req){n+=c.length;if(n>limit)throw Error('REQUEST_TOO_LARGE');chunks.push(c);}data=Buffer.concat(chunks);return data;};
-   if(path==='/healthz'){json(200,{status:'ok',version:'0.7.0',storage:'sqlite-files'});return;}
+   if(path==='/healthz'){json(200,{status:'ok',version:'0.8.0',storage:'sqlite-files'});return;}
    if(path==='/config.js'){send(200,`globalThis.__SHUYE_BASE__=${JSON.stringify(basePath)};`,'text/javascript');return;}
    if(path==='/api/session'){json(200,{user:owner||null});return;}
    if(path==='/signin-with-chatgpt'||path==='/login'){
@@ -89,7 +91,7 @@ export async function startServer({directory,publicDirectory,origin,basePath='/s
  });
  server.requestTimeout=120000;server.headersTimeout=15000;
  await new Promise((ok,fail)=>{server.once('error',fail);server.listen(port,host,ok)});
- return {server,store,close:async()=>{await store.AGENT_TASKS?.close();await store.LAYOUT_ASSISTANT?.close();await store.JOURNAL_RUNTIME?.close();await new Promise(r=>server.close(r));store.close();}};
+ return {server,store,close:async()=>{store.API_MODELS?.close();await store.AGENT_TASKS?.close();await store.LAYOUT_ASSISTANT?.close();await store.JOURNAL_RUNTIME?.close();await new Promise(r=>server.close(r));store.close();}};
 }
 if(process.argv[1]&&realpathSync(process.argv[1])===realpathSync(fileURLToPath(import.meta.url))){
  const config=JSON.parse(await readFile(process.env.SHUYE_CONFIG||'/etc/shuye/config.json','utf8'));

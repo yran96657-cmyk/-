@@ -16,6 +16,20 @@ def package(body,parts=None):
     return data.getvalue()
 
 class WordCompatibilityTests(unittest.TestCase):
+    def test_inherited_italic_and_explicit_off_survive(self):
+        styles='<w:styles xmlns:w="'+NS['w']+'"><w:style w:type="character" w:styleId="base"><w:rPr><w:i/><w:sz w:val="18"/></w:rPr></w:style><w:style w:type="character" w:styleId="child"><w:basedOn w:val="base"/></w:style></w:styles>'
+        body='<w:p><w:r><w:rPr><w:rStyle w:val="child"/></w:rPr><w:t>Citrus</w:t></w:r><w:r><w:rPr><w:rStyle w:val="child"/><w:i w:val="0"/></w:rPr><w:t> upright</w:t></w:r></w:p>'
+        r=import_docx(package(body,{'word/styles.xml':styles}))
+        self.assertEqual(r['blocks'][0]['marks'],[{'start':0,'end':6,'italic':True,'fontSize':9},{'start':6,'end':14,'italic':False,'fontSize':9}])
+        self.assertFalse(any(d['severity']=='error' for d in r['importReports'][0]['diagnostics']))
+
+    def test_wps_legacy_conversion_requires_native_reader(self):
+        from unittest.mock import patch,MagicMock
+        from word_compat import check_legacy_converter
+        compound=MagicMock();compound.__enter__.return_value.exists.return_value=True
+        with patch('olefile.OleFileIO',return_value=compound):
+            with self.assertRaisesRegex(ValueError,'WORD_DOC_NATIVE_REQUIRED'):check_legacy_converter(b'fixture','LibreOffice')
+            check_legacy_converter(b'fixture','Microsoft Word')
     def test_png_pdf_preserves_pixels_without_raster_resampling(self):
         from png_pdf import png_pdf
         from PIL import Image
@@ -119,5 +133,19 @@ class WordCompatibilityTests(unittest.TestCase):
             body='<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>'+instruction+'</w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
             r=import_docx(package(body));self.assertEqual(r['importReports'][0]['counts']['metadataFields'],1)
             self.assertFalse(any(d['severity']=='error' for d in r['importReports'][0]['diagnostics']))
+
+    def test_nested_mathtype_hidden_counter_preserves_literal_number(self):
+        def instruction(value):return '<w:r><w:instrText>'+value+'</w:instrText></w:r>'
+        begin='<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        end='<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+        hidden=begin+instruction(r'SEQ MTEqn \h \* MERGEFORMAT')+end
+        body='<w:p>'+begin+instruction(r'MACROBUTTON MTPlaceRef \* MERGEFORMAT ')+hidden+instruction('(')+instruction('12')+instruction(')')+end+'</w:p>'
+        result=import_docx(package(body));report=result['importReports'][0]
+        self.assertEqual(result['blocks'][0]['text'],'(12)')
+        self.assertEqual(report['counts']['metadataFields'],2)
+        self.assertFalse(any(d['severity']=='error' for d in report['diagnostics']))
+        for invalid in [body.replace(r'\h ',''),body.replace('MTPlaceRef','UnknownMacro'),body.replace('>12<','>unsafe<')]:
+            result=import_docx(package(invalid))
+            self.assertTrue(any(d['severity']=='error' for d in result['importReports'][0]['diagnostics']))
 
 if __name__=='__main__':unittest.main()

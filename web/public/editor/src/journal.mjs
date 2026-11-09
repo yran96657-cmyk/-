@@ -20,6 +20,7 @@ export function validateJournal(raw,blocks,notes=[]){
       if(!journalRoles.includes(role)||!style||typeof style!=='object'||Array.isArray(style))throw Error('期刊角色样式无效。');
       const value={};for(const [key,v] of Object.entries(style)){
         if(key==='bold'){if(typeof v!=='boolean')throw Error('角色字重无效。');}
+        else if(key==='align'){if(!['left','center','right','justify'].includes(v))throw Error('角色对齐无效。');}
         else if(key==='fontFamily'){if(!['serif','sans'].includes(v))throw Error('角色字体无效。');}
         else {const bounds={fontSize:[6,24],leading:[7,36],spaceBefore:[0,36],spaceAfter:[0,24]}[key];if(!bounds||!Number.isFinite(v)||v<bounds[0]||v>bounds[1])throw Error('角色样式数值无效。');}
         value[key]=v;
@@ -35,6 +36,14 @@ export function validateJournal(raw,blocks,notes=[]){
 }
 export function journalBlockFields(b){
   const fields={};
+  if(b.journalStyle!==undefined){
+    if(!b.journalStyle||typeof b.journalStyle!=='object'||Array.isArray(b.journalStyle))throw Error('组件期刊样式无效');
+    fields.journalStyle={};
+    for(const [k,v] of Object.entries(b.journalStyle)){
+      if(!(k==='fontSize'&&Number.isFinite(v)&&v>=5&&v<=72||k==='bold'&&typeof v==='boolean'||k==='align'&&['left','center','right','justify'].includes(v)||k==='fontFamily'&&['serif','sans','kai'].includes(v)))throw Error('组件期刊样式无效：'+k);
+      fields.journalStyle[k]=v;
+    }
+  }
   if(b.floatPlacement!==undefined){if(!['in-flow','top'].includes(b.floatPlacement)||!['image','table'].includes(b.type)||b.floatPlacement==='top'&&(b.placement!=='full-width'||b.sideTextIds?.length))throw Error('页顶浮动仅支持通栏图或短表。');fields.floatPlacement=b.floatPlacement;}
   if(b.legacySource!==undefined){if(b.type!=='equation')throw Error('旧式公式来源类型无效。');fields.legacySource=legacySource(b.legacySource);}
   if(b.vectorSource!==undefined){if(b.type!=='image')throw Error('矢量来源类型无效。');fields.vectorSource=vectorSource(b.vectorSource);}

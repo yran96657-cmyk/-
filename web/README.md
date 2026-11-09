@@ -1,6 +1,6 @@
 # 书页 · 在线出版工作台
 
-独立开源的中文图书排版网站。产品方向参照方正飞翔印刷版 9.0-1794，**尚未达到飞翔完整功能对等**。Web 0.7.0 包含已验收的自由版面、母版、跨页表格与注释、ICC/PDF 输出和有限 PDML 保留式编辑。按用户要求发布已完成功能，尚未完成项继续明确列出；详见 [发布说明](docs/release-0.5.0.md) 和 [逐项验收](docs/native-rich-pdfx-acceptance.md)。
+独立开源的中文图书排版网站。产品方向参照方正飞翔印刷版 9.0-1794，**尚未达到飞翔完整功能对等**。Web 0.8.0 包含已验收的自由版面、母版、跨页表格与注释、ICC/PDF 输出和有限 PDML 保留式编辑。按用户要求发布已完成功能，尚未完成项继续明确列出；详见 [发布说明](docs/release-0.5.0.md) 和 [逐项验收](docs/native-rich-pdfx-acceptance.md)。
 
 ## 自有服务器
 
@@ -22,7 +22,7 @@
 
 ## Agent / MCP
 
-当前工作区 `POST /mcp` 提供 108 个工具，与编辑器共享用户隔离的云端工程。Sites 使用发布生成的个人插件，自托管使用 Bearer MCP。`list_projects` → `get_project_context` → `list_components` → `apply_changes`，修改必须携带 `expectedRevision`，可先使用 `dryRun:true`。所有操作按稳定组件 ID 定位，无 computer-use 依赖。新增期刊工具先调用 `get_journal_capabilities`，只有 `enabled:true` 才能进行原生导入和全文 PDF 编译；Workers 部署不支持本机 TeX。
+当前工作区 `POST /mcp` 提供 113 个工具，与编辑器共享用户隔离的云端工程。Sites 使用发布生成的个人插件，自托管使用 Bearer MCP。`list_projects` → `get_project_context` → `list_components` → `apply_changes`，修改必须携带 `expectedRevision`，可先使用 `dryRun:true`。所有操作按稳定组件 ID 定位，无 computer-use 依赖。新增期刊工具先调用 `get_journal_capabilities`，只有 `enabled:true` 才能进行原生导入和全文 PDF 编译；Workers 部署不支持本机 TeX。
 
 `inspect_journal_docx` 可在创建项目之前检查原稿的修订、公式和图像。125 MP 单帧 TIFF、MTEF/EMF 来源校验与修订策略的整合边界见 [导入链验证](docs/journal-import-integration.md)。
 
@@ -66,3 +66,5 @@ MIT。仅包含独立源代码与声明的第三方依赖，不包含方正程�
 ## AI 排版工作台
 
 期刊编辑器默认打开 Agent 任务面板，完整工具集中在“全部工具”（Ctrl/⌘K）。独立服务器配置本机 Ollama 与期刊引擎后，可连续执行检查、版式应用、PDF 校样和机器检查；人处理例外、审阅结果或整次撤销。后台任务关闭页面仍可继续，外部 Agent 使用同一组任务工具。见 [Agent 工作流](docs/agent-workflow.md)。配置和真实模型验收见 [AI 排版工作台](docs/ai-workbench.md)。
+
+普通 API 模型的部署、出站连接器、批量样式与任务恢复见 [API Agent](../docs/api-agent.md)。

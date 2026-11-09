@@ -4,6 +4,7 @@ import {mergeCells,splitCell,resizeTable} from '../public/editor/src/table-layou
 import {documentSchema,operation} from './schema.mjs';
 import {applyCompositionOperation} from '../public/editor/src/composition.mjs';
 import {compositionOperations} from './composition-schema.mjs';
+import {setJournalBlockStyle} from '../public/editor/src/journal-style.mjs';
 const compositionNames=new Set(compositionOperations.map(o=>o.shape.op.value));
 
 export function checkDocument(raw){
@@ -43,9 +44,9 @@ export function applyOperations(input,rawOps){
   for(const raw of rawOps){const o=operation.parse(raw);if(compositionNames.has(o.op)){applyCompositionOperation(doc,o);continue;}switch(o.op){
     case 'set_journal':doc.journal=o.journal;break;
     case 'set_title':doc.title=o.title;break;
-    case 'set_layout':Object.assign(doc.layout,o.patch);break;
+    case 'set_layout':Object.assign(doc.layout,o.patch);if(o.patch.footerMode===undefined&&['footer','footerEven'].some(k=>Object.hasOwn(o.patch,k)))doc.layout.footerMode='custom';break;
     case 'insert_blocks':insert(o.blocks,o.beforeId);break;
-    case 'update_block':{const b=get(o.blockId);if(o.patch.text!==undefined)replaceBlockText(b,o.patch.text);Object.assign(b,o.patch);break;}
+    case 'update_block':{const b=get(o.blockId);if(o.patch.text!==undefined)replaceBlockText(b,o.patch.text);Object.assign(b,o.patch);if(doc.journal)setJournalBlockStyle(b,o.patch);break;}
     case 'set_text_block_type':{const b=get(o.blockId);if(!['paragraph','heading'].includes(b.type))throw Error('TYPE_CHANGE_NEEDS_TEXT_BLOCK');b.type=o.type;if(o.type==='heading')b.level=o.level;else delete b.level;break;}
     case 'replace_text':{const b=get(o.blockId);boundary(b.text,o.start);boundary(b.text,o.end);if(o.end<o.start)throw Error('INVALID_RANGE');replaceBlockText(b,b.text.slice(0,o.start)+o.text+b.text.slice(o.end));break;}
     case 'delete_blocks':remove(o.blockIds);break;

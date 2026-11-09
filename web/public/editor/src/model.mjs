@@ -66,6 +66,7 @@ export function validateDocument(raw) {
   layout.headerEven = String(raw.layout?.headerEven ?? layout.header).slice(0, 200);
   layout.footer = String(raw.layout?.footer ?? '{page}').slice(0,200);
   layout.footerEven = String(raw.layout?.footerEven ?? layout.footer).slice(0,200);
+  if(raw.layout?.footerMode!==undefined){if(!['template','custom'].includes(raw.layout.footerMode))throw Error('页脚模式无效');layout.footerMode=raw.layout.footerMode;}
   layout.notesMode = raw.layout?.notesMode === 'endnote' ? 'endnote' : 'footnote';
   if(raw.layout?.writingMode!==undefined&&!['horizontal-tb','vertical-rl'].includes(raw.layout.writingMode))throw Error('文字方向无效。');
   layout.writingMode = raw.layout?.writingMode || 'horizontal-tb';

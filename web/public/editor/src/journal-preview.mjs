@@ -21,8 +21,8 @@ const roles={
 };
 export function journalPreviewStyle(block,journal){
  const base=journal&&roles[block.role];if(!base)return null;
- const [size,leading,align,bold]=base,custom=journal.roleStyles?.[block.role]||{},fontSize=custom.fontSize??size;
- return {fontSize:`${fontSize}pt`,lineHeight:String((custom.leading??leading)/fontSize),fontWeight:(custom.bold??bold)?'700':'400',textAlign:align,textIndent:/^(abstract|keywords)-/.test(block.role)?'13.8pt':'0',paddingTop:`${custom.spaceBefore??(block.role.startsWith('title')?4:0)}pt`,paddingBottom:`${custom.spaceAfter??0}pt`,fontFamily:custom.fontFamily||'serif'};
+ const [size,leading,align,bold]=base,custom={...journal.roleStyles?.[block.role],...block.journalStyle},fontSize=custom.fontSize??size;
+ return {fontSize:`${fontSize}pt`,lineHeight:String((custom.leading??Math.max(leading,fontSize*1.2))/fontSize),fontWeight:(custom.bold??bold)?'700':'400',textAlign:custom.align??align,textIndent:/^(abstract|keywords)-/.test(block.role)?'13.8pt':'0',paddingTop:`${custom.spaceBefore??(block.role.startsWith('title')?4:0)}pt`,paddingBottom:`${custom.spaceAfter??0}pt`,fontFamily:custom.fontFamily||'serif'};
 }
 
 // A contiguous, ordinary front matter band can span the text columns. Oversized

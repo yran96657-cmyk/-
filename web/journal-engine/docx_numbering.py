@@ -4,6 +4,7 @@ Counters belong to concrete numId instances. Unsupported numbering fails the
 import gate instead of quietly dropping a reference/step number.
 """
 import re
+import xml.etree.ElementTree as ET
 
 W='{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
 
@@ -93,14 +94,41 @@ class Numbering:
         except (ValueError,TypeError) as error:
             self.warnings.append('Word 自动编号未完整恢复：'+str(error)+'；须核对原稿。');return ''
 
+def materialize_mathtype_labels(root):
+    """Freeze MTPlaceRef's literal display argument, without running a macro.
+
+    Word can store `(1)` as instruction text following a nested hidden SEQ,
+    rather than as a cached field result. Only this exact numeric label form
+    is handled; unknown macro arguments remain subject to the field gate.
+    """
+    parents={child:parent for parent in root.iter() for child in parent}
+    stack=[]
+    for e in list(root.iter()):
+        if e.tag==W+'fldChar':
+            kind=e.get(W+'fldCharType')
+            if kind=='begin':stack.append({'nodes':[],'separated':False})
+            elif kind=='separate' and stack:stack[-1]['separated']=True
+            elif kind=='end' and stack:
+                field=stack.pop();nodes=field['nodes']
+                if field['separated'] or not nodes:continue
+                match=re.fullmatch(r'\s*(MACROBUTTON MTPlaceRef \\\* MERGEFORMAT)\s*(\([0-9]+\))\s*',''.join(n.text or '' for n in nodes))
+                if not match:continue
+                nodes[0].text=match[1]
+                for n in nodes[1:]:n.text=''
+                label=ET.Element(W+'t');label.text=match[2]
+                parent=parents[nodes[-1]];parent.insert(list(parent).index(nodes[-1])+1,label)
+        elif e.tag==W+'instrText' and stack and not stack[-1]['separated']:stack[-1]['nodes'].append(e)
+
+
 def check_fields(root,warnings,stats=None):
+    materialize_mathtype_labels(root)
     # EndNote's DATA field stores document metadata, not a visible citation.
     # Do not exempt EN.CITE, EN.REFLIST, or other empty/unknown fields.
     def metadata(instruction):
         value=' '.join(instruction.split())
         # MathType's hidden section/chapter counters carry no displayed result.
         # Do not execute the macro or exempt visible SEQ fields without \\h.
-        return value=='ADDIN EN.CITE.DATA' or value in ('MACROBUTTON MTEditEquationSection2',r'MACROBUTTON MTPlaceRef \* MERGEFORMAT') or bool(re.fullmatch(r'SEQ MT(?:Eqn|Sec|Chap) \\r(?: [0-9]+)? \\h \\\* MERGEFORMAT',value))
+        return value=='ADDIN EN.CITE.DATA' or value in ('MACROBUTTON MTEditEquationSection2',r'MACROBUTTON MTPlaceRef \* MERGEFORMAT') or bool(re.fullmatch(r'SEQ MT(?:Eqn|Sec|Chap)(?: \\r(?: [0-9]+)?)? \\h \\\* MERGEFORMAT',value))
     stack=[];count=0;metadata_count=0
     for e in root.iter():
         if e.tag==W+'fldSimple':

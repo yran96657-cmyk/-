@@ -1,10 +1,11 @@
-import {mkdir,readdir,readFile,writeFile,rename} from 'node:fs/promises';
+import {mkdir,readdir,readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod/v4';
 import {modelLayoutResponse,changedLayoutFields,layoutFields} from '../lib/assistant-tools.mjs';
 import {documentFingerprint} from '../public/editor/src/project-sync.mjs';
 import {documentContext} from '../lib/project-context.mjs';
+import {atomicJson} from './atomic-json.mjs';
 const digest=value=>createHash('sha256').update(typeof value==='string'?value:documentFingerprint(value)).digest('hex');
 const now=()=>new Date().toISOString();
 const publicPlan=p=>Object.fromEntries(['planId','projectId','revision','status','instruction','summary','changes','model','createdAt','finishedAt','appliedRevision','undoneRevision','error'].filter(k=>p[k]!==undefined).map(k=>[k,p[k]]));
@@ -50,7 +51,7 @@ export async function createLayoutAssistant({directory,...options}){
  await mkdir(directory,{recursive:true,mode:0o700});
  const file=id=>{if(!/^[a-f0-9-]{36}$/.test(id))throw Error('PLAN_NOT_FOUND');return join(directory,id+'.json');};
  const read=async id=>{try{return JSON.parse(await readFile(file(id),'utf8'));}catch(e){if(e.code==='ENOENT')throw Error('PLAN_NOT_FOUND');throw e;}};
- const save=async p=>{const target=file(p.planId),tmp=target+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(p),{mode:0o600,flag:'wx'});await rename(tmp,target);};
+ const save=p=>atomicJson(file(p.planId),p);
  for(const name of await readdir(directory))if(name.endsWith('.json')){const p=await read(name.slice(0,-5));if(p.status==='running'){p.status='failed';p.error='服务已重启，请重新生成建议';p.finishedAt=now();await save(p);}}
  async function load(store,{projectId,planId}){const p=await read(planId);if(p.ownerHash!==digest(store.owner)||p.projectId!==projectId)throw Error('PLAN_NOT_FOUND');const current=await store.get(projectId);return {p,current};}
  const stale=(p,current)=>current.revision!==(p.status==='applied'?p.appliedRevision:p.status==='undone'?p.undoneRevision:p.revision);

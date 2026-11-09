@@ -117,7 +117,7 @@ class Writer:
                 style={}
                 for m in marks:
                     if m['start']<=offset(a)<m['end']:style.update(m)
-                run=p.add_run(text[a:b]);font(run,style.get('fontSize',self.size),style.get('bold',self.bold),style.get('fontFamily','serif'))
+                run=p.add_run(text[a:b]);font(run,style.get('fontSize',self.size),style.get('bold',self.bold),style.get('fontFamily',getattr(self,'family','serif')))
                 for key in ('italic','underline'):setattr(run,key,style.get(key,False))
                 run.font.superscript=style.get('superscript',False);run.font.subscript=style.get('subscript',False)
                 if style.get('color'):run.font.color.rgb=RGBColor.from_string(style['color'][1:])
@@ -150,11 +150,15 @@ class Writer:
         p.add_run().add_picture(BytesIO(data),width=Mm(width_mm));p.alignment=WD_ALIGN_PARAGRAPH.CENTER;self.counts['images']+=1
 
     def block(self,b,parent=None):
-        parent=parent or self.doc;typ=b['type'];role=b.get('role');self.size=b.get('fontSize',self.layout.get('fontSize',10.5));self.bold=b.get('bold',False)
+        parent=parent or self.doc;typ=b['type'];role=b.get('role');self.size=b.get('fontSize',self.layout.get('fontSize',10.5));self.bold=b.get('bold',False);self.family=b.get('fontFamily','serif')
         leading=self.size*self.layout.get('lineHeight',1.5);align=b.get('align','justify')
         if role in ROLE_STYLE:
-            self.size,leading,align,self.bold=ROLE_STYLE[role];custom=self.journal.get('roleStyles',{}).get(role,{})
-            self.size=custom.get('fontSize',self.size);leading=custom.get('leading',leading);self.bold=custom.get('bold',self.bold)
+            self.size,leading,align,self.bold=ROLE_STYLE[role];custom={**self.journal.get('roleStyles',{}).get(role,{}),**b.get('journalStyle',{})}
+            self.size=custom.get('fontSize',self.size);leading=custom.get('leading',max(leading,self.size*1.2));self.bold=custom.get('bold',self.bold);align=custom.get('align',align)
+            self.family=custom.get('fontFamily','serif')
+            suppressed=set(custom)&{'fontSize','fontFamily','bold'}
+            if self.journal.get('normalizeTypography',True):suppressed|={'fontSize','fontFamily'}
+            b={**b,'marks':[{k:v for k,v in m.items() if k not in suppressed} for m in b.get('marks',[])]}
         if typ=='pageBreak':parent.add_paragraph().add_run().add_break(__import__('docx.enum.text',fromlist=['WD_BREAK']).WD_BREAK.PAGE);return
         if typ=='table':
             rows=b['rows'];table=parent.add_table(rows=len(rows),cols=len(rows[0]));table.autofit=False

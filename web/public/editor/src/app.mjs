@@ -1,3 +1,4 @@
+import {setJournalBlockStyle} from './journal-style.mjs';
 import {
   uid,
   defaults,
@@ -382,6 +383,7 @@ function insert(type, extra = {}) {
 }
 function validatedLayout(updates) {
   try {
+    if(['footer','footerEven'].some(k=>Object.hasOwn(updates,k)))updates={...updates,footerMode:'custom'};
     const next = validateDocument({
       ...doc,
       layout: { ...doc.layout, ...updates },
@@ -505,6 +507,7 @@ for (const [id, key, convert] of [
       const copy = structuredClone(doc),
         b = copy.blocks.find((b) => b.id === selected);
       b[key] = convert($(id).value, $(id));
+      if(copy.journal)setJournalBlockStyle(b,{[key]:b[key]});
       const next = validateDocument(copy);
       change(() => (doc = next));
     } catch (e) {

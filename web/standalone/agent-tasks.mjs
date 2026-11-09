@@ -1,25 +1,27 @@
 // Persistent, bounded orchestration. All edits use the same revision-checked tools
 // as external MCP clients. The model never receives executable tool names.
-import {mkdir,readdir,readFile,writeFile,rename} from 'node:fs/promises';
+import {mkdir,readdir,readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {documentDiagnostics} from '../public/editor/src/integrity.mjs';
 import {journalFontProblems} from '../public/editor/src/journal-fonts.mjs';
 import {documentFingerprint} from '../public/editor/src/project-sync.mjs';
+import {runApiAgent} from './api-agent.mjs';
+import {atomicJson} from './atomic-json.mjs';
 const hash=value=>createHash('sha256').update(typeof value==='string'?value:documentFingerprint(value)).digest('hex');
 const now=()=>new Date().toISOString();
 const sleep=(ms,signal)=>new Promise(resolve=>{const finish=()=>{clearTimeout(timer);signal?.removeEventListener('abort',finish);resolve();};const timer=setTimeout(finish,ms);signal?.addEventListener('abort',finish,{once:true});if(signal?.aborted)finish();});
-const recoverable=new Set(['INTERRUPTED','CANCELLED','ASSISTANT_BUSY_RETRY','JOURNAL_WORKER_BUSY_RETRY','MODEL_SERVICE_ERROR','MODEL_SERVICE_UNAVAILABLE','WORKER_INTERRUPTED_RETRY','MODEL_INCOMPLETE_RESPONSE','MODEL_TIMEOUT','PROOF_FAILED','TASK_TIMEOUT']);
+const recoverable=new Set(['INTERRUPTED','CANCELLED','ASSISTANT_BUSY_RETRY','JOURNAL_WORKER_BUSY_RETRY','MODEL_SERVICE_ERROR','MODEL_SERVICE_UNAVAILABLE','WORKER_INTERRUPTED_RETRY','MODEL_INCOMPLETE_RESPONSE','MODEL_TIMEOUT','MODEL_CONNECTION_FAILED','MODEL_CONNECTOR_OFFLINE','MODEL_CONNECTOR_ERROR','MODEL_CANCELLED','MODEL_INTERRUPTED','PROOF_FAILED','TASK_TIMEOUT']);
 const currentRevision=t=>t.undoneRevision||t.appliedRevision||t.revision;
-const fields=['taskId','projectId','requestId','goal','mode','revision','status','stage','createdAt','updatedAt','finishedAt','attempt','events','planId','changes','model','appliedRevision','undoneRevision','proofId','proof','context','issue','sourceSha256','resultSha256','review'];
+const fields=['taskId','projectId','requestId','goal','mode','apiModel','usage','apiChanges','apiCalls','modelSummary','revision','status','stage','createdAt','updatedAt','finishedAt','attempt','events','planId','changes','model','appliedRevision','undoneRevision','proofId','proof','context','issue','sourceSha256','resultSha256','review'];
 function issue(code,message,details){return {code,message,...(details?{details}:{}),retryable:recoverable.has(code)};}
 function taskError(code,message,details){return Object.assign(Error(message||code),{taskIssue:issue(code,message||code,details)});}
 
-export async function createAgentTasks({directory,invoke,pollMs=400,timeoutMs=480000,maxTasks=1000}){
+export async function createAgentTasks({directory,invoke,tools=[],pollMs=400,timeoutMs=720000,maxTasks=1000}){
  await mkdir(directory,{recursive:true,mode:0o700});
  const index=new Map(),active=new Map(),locks=new Set();let closing=false,starting=false;
  const path=id=>{if(!/^[a-f0-9-]{36}$/.test(id))throw Error('TASK_NOT_FOUND');return join(directory,id+'.json');};
- async function save(t){t.updatedAt=now();const file=path(t.taskId),tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(t),{mode:0o600,flag:'wx'});await rename(tmp,file);index.set(t.taskId,structuredClone(t));}
+ async function save(t){t.updatedAt=now();await atomicJson(path(t.taskId),t);index.set(t.taskId,structuredClone(t));}
  for(const file of await readdir(directory))if(/^[a-f0-9-]{36}\.json$/.test(file)){
   const t=JSON.parse(await readFile(join(directory,file),'utf8'));index.set(t.taskId,t);
   if(t.status==='running'){t.status='needs_attention';t.issue=issue(t.stage==='committing'?'COMMIT_OUTCOME_UNKNOWN':'INTERRUPTED',t.stage==='committing'?'服务在提交时中断，请核对当前版本后新建任务。':'服务已重启，可从保留的步骤继续。');await save(t);}
@@ -62,6 +64,10 @@ export async function createAgentTasks({directory,invoke,pollMs=400,timeoutMs=48
     await save(t);
    }
    checkpoint();
+   if(t.mode==='api'&&!t.apiFinished){
+    await runApiAgent({store,t,invoke,tools,event,signal,checkpoint,verify:()=>verify(store,t)});
+    t.apiFinished=true;await save(t);
+   }
    if(t.mode==='layout'&&!t.appliedRevision&&!t.noChanges){
     let plan=t.planId?await invoke(store,'get_layout_plan',args()):null;
     if(!plan||['failed','cancelled'].includes(plan.status)){
@@ -118,8 +124,10 @@ export async function createAgentTasks({directory,invoke,pollMs=400,timeoutMs=48
     if(old){if(old.requestHash!==requestHash)throw Error('IDEMPOTENCY_CONFLICT');return api.get(store,{projectId:old.projectId,taskId:old.taskId});}
     const current=await store.get(a.projectId);if(current.revision!==a.expectedRevision)throw Error('REVISION_CONFLICT');
     if(a.mode==='layout'&&!store.layoutAssistant)throw Error('LAYOUT_ASSISTANT_UNAVAILABLE');
+    if(a.mode==='api'&&!store.apiModels?.status(store.owner).models.some(m=>m.id===a.apiModel&&m.ready))throw Error('MODEL_CONNECTOR_OFFLINE');
     if(active.size||locks.size)throw Error('AGENT_BUSY_RETRY');if(index.size>=maxTasks)throw Error('AGENT_TASK_LIMIT');
     const t={taskId:randomUUID(),ownerHash,requestHash,...a,revision:a.expectedRevision,sourceSha256:hash(current.document),status:'running',stage:'inspect',createdAt:now(),attempt:1,events:[]};delete t.expectedRevision;
+    if(a.mode==='api')t.apiSourceKey=(await store.row(a.projectId)).object_key;
     await save(t);launch(store,t);return publicTask(t,current);
    }finally{starting=false;}
   },
@@ -153,7 +161,7 @@ export async function createAgentTasks({directory,invoke,pollMs=400,timeoutMs=48
    try{
     const {t,current}=await load(store,a);if(current.revision!==a.expectedRevision)throw Error('REVISION_CONFLICT');
     if(!publicTask(t,current).actions.undo)throw Error('TASK_NOT_UNDOABLE');await verify(store,t);
-    const undone=await invoke(store,'undo_layout_plan',{projectId:t.projectId,planId:t.planId,expectedRevision:t.appliedRevision});
+    const undone=t.mode==='api'?{undoneRevision:(await store.change(t.projectId,t.appliedRevision,async()=>({document:await store.read(t.apiSourceKey)}))).revision}:await invoke(store,'undo_layout_plan',{projectId:t.projectId,planId:t.planId,expectedRevision:t.appliedRevision});
     t.undoneRevision=undone.undoneRevision;t.status='undone';delete t.issue;await event(t,'undone','已恢复任务前的版式',`当前 r${t.undoneRevision}`);return publicTask(t,await store.get(a.projectId));
    }finally{locks.delete(a.taskId);}
   },
