@@ -16,8 +16,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" className="shuye-desktop">
       <head>
+        <meta name="color-scheme" content="dark" />
+        <style media="screen">{'html.shuye-desktop{color-scheme:dark;background:#232323}'}</style>
         <link rel="stylesheet" href="/brand/brand-colors.css" />
       </head>
       <body className="antialiased">{children}</body>
