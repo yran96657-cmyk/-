@@ -1,0 +1,205 @@
+{
+  "version": "0.8.1",
+  "codeCommit": "e124f03",
+  "styleChecks": 134,
+  "passed": true,
+  "articles": [
+    {
+      "article": 1,
+      "pages": 9,
+      "checks": {
+        "noteSize": true,
+        "noteLeading": true,
+        "noteLabelFont": true,
+        "noteBodyFonts": true,
+        "noteIndent": true,
+        "noteLabelWidth": true,
+        "noteRuleWidth": true,
+        "noteRuleThickness": true,
+        "noteRuleGap": true,
+        "referenceSize": true,
+        "referenceHeadingSize": true,
+        "referenceLeading": true,
+        "referenceFonts": true,
+        "referenceNumbering": true,
+        "referenceColumns": true,
+        "referenceIndent": true,
+        "referenceGap": true,
+        "citationSize": true,
+        "citationRise": true
+      }
+    },
+    {
+      "article": 2,
+      "pages": 13,
+      "checks": {
+        "noteSize": true,
+        "noteLeading": true,
+        "noteLabelFont": true,
+        "noteBodyFonts": true,
+        "noteIndent": true,
+        "noteLabelWidth": true,
+        "noteRuleWidth": true,
+        "noteRuleThickness": true,
+        "noteRuleGap": true,
+        "referenceSize": true,
+        "referenceHeadingSize": true,
+        "referenceLeading": true,
+        "referenceFonts": true,
+        "referenceNumbering": true,
+        "referenceColumns": true,
+        "referenceIndent": true,
+        "referenceGap": true,
+        "citationSize": true,
+        "citationRise": true,
+        "inlineCitationSize": true
+      }
+    },
+    {
+      "article": 3,
+      "pages": 8,
+      "checks": {
+        "noteSize": true,
+        "noteLeading": true,
+        "noteLabelFont": true,
+        "noteBodyFonts": true,
+        "noteIndent": true,
+        "noteLabelWidth": true,
+        "noteRuleWidth": true,
+        "noteRuleThickness": true,
+        "noteRuleGap": true,
+        "referenceSize": true,
+        "referenceHeadingSize": true,
+        "referenceLeading": true,
+        "referenceFonts": true,
+        "referenceNumbering": true,
+        "referenceColumns": true,
+        "referenceIndent": true,
+        "referenceGap": true,
+        "citationSize": true,
+        "citationRise": true
+      }
+    },
+    {
+      "article": 4,
+      "pages": 12,
+      "checks": {
+        "noteSize": true,
+        "noteLeading": true,
+        "noteLabelFont": true,
+        "noteBodyFonts": true,
+        "noteIndent": true,
+        "noteLabelWidth": true,
+        "noteRuleWidth": true,
+        "noteRuleThickness": true,
+        "noteRuleGap": true,
+        "referenceSize": true,
+        "referenceHeadingSize": true,
+        "referenceLeading": true,
+        "referenceFonts": true,
+        "referenceNumbering": true,
+        "referenceColumns": true,
+        "referenceIndent": true,
+        "referenceGap": true,
+        "citationSize": true,
+        "citationRise": true,
+        "inlineCitationSize": true
+      }
+    },
+    {
+      "article": 5,
+      "pages": 11,
+      "checks": {
+        "noteSize": true,
+        "noteLeading": true,
+        "noteLabelFont": true,
+        "noteBodyFonts": true,
+        "noteIndent": true,
+        "noteLabelWidth": true,
+        "noteRuleWidth": true,
+        "noteRuleThickness": true,
+        "noteRuleGap": true,
+        "referenceSize": true,
+        "referenceHeadingSize": true,
+        "referenceLeading": true,
+        "referenceFonts": true,
+        "referenceNumbering": true,
+        "referenceColumns": true,
+        "referenceIndent": true,
+        "referenceGap": true,
+        "citationSize": true,
+        "citationRise": true
+      }
+    },
+    {
+      "article": 6,
+      "pages": 8,
+      "checks": {
+        "noteSize": true,
+        "noteLeading": true,
+        "noteLabelFont": true,
+        "noteBodyFonts": true,
+        "noteIndent": true,
+        "noteLabelWidth": true,
+        "noteRuleWidth": true,
+        "noteRuleThickness": true,
+        "noteRuleGap": true,
+        "referenceSize": true,
+        "referenceHeadingSize": true,
+        "referenceLeading": true,
+        "referenceFonts": true,
+        "referenceNumbering": true,
+        "referenceColumns": true,
+        "referenceIndent": true,
+        "referenceGap": true,
+        "inlineCitationSize": true
+      }
+    },
+    {
+      "article": 7,
+      "pages": 12,
+      "checks": {
+        "noteSize": true,
+        "noteLeading": true,
+        "noteLabelFont": true,
+        "noteBodyFonts": true,
+        "noteIndent": true,
+        "noteLabelWidth": true,
+        "noteRuleWidth": true,
+        "noteRuleThickness": true,
+        "noteRuleGap": true,
+        "referenceSize": true,
+        "referenceHeadingSize": true,
+        "referenceLeading": true,
+        "referenceFonts": true,
+        "referenceNumbering": true,
+        "referenceColumns": true,
+        "referenceIndent": true,
+        "referenceGap": true,
+        "citationSize": true,
+        "citationRise": true
+      }
+    }
+  ],
+  "webTests": {
+    "passed": 281,
+    "failed": 0
+  },
+  "engineTests": {
+    "total": 144,
+    "passed": 142,
+    "skipped": 2
+  },
+  "liveMcp": {
+    "passed": true,
+    "tools": 113,
+    "articles": 7,
+    "allGlyphsAndPositionsIdentical": true
+  },
+  "deployment": {
+    "version": "0.8.1",
+    "unchangedProjects": 40,
+    "unchangedObjects": 114,
+    "serverSha256": "91df427917e7b475aac1496ef422d916094d07fe0ce18a5a44975c0ca522650e"
+  }
+}
