@@ -17,7 +17,7 @@ export async function applyTypesetting(store,a){
   if(a.journal){
    if(a.journal.articleNoteId!==undefined&&a.journal.articleNoteId!==original.journal.articleNoteId)throw Error('TYPESETTING_PRESERVES_NOTE_BINDINGS: articleNoteId cannot change; omit it or echo the current value.');
    const roleStyles={...original.journal.roleStyles};for(const [role,patch] of Object.entries(a.journal.roleStyles||{}))roleStyles[role]={...roleStyles[role],...patch};
-   ops.push({op:'set_journal',journal:journalSchema.parse({...original.journal,...a.journal,roleStyles})});
+   ops.push({op:'set_journal',journal:journalSchema.parse({...original.journal,...a.journal,...(original.journal.annotations||a.journal.annotations?{annotations:{...original.journal.annotations,...a.journal.annotations}}:{}),roleStyles})});
   }
   for(const [index,s] of a.styles.entries()){
    if(!s.type&&!s.role&&!s.blockIds)throw Error('STYLE_SELECTOR_REQUIRED');
@@ -46,7 +46,7 @@ export function addTypesettingTools(add,store){
   return {projectId:a.projectId,revision:r.revision,...documentContext(d,{limit:40}),journal:d.journal,
    fonts:store.journalRuntime?.capabilities.environment?.fonts,imageConstraints:imageFit(d),dataTableCount:d.blocks.filter(b=>b.type==='table'&&!b.cellImages?.length).length,ordinaryHeadingCount:d.blocks.filter(b=>b.type==='heading'&&!b.role).length,
    styleGroups:d.blocks.filter(b=>b.role||b.type==='heading'||b.type==='table'||b.type==='image').slice(0,100).map(b=>({id:b.id,type:b.type,role:b.role,level:b.level,fontSize:b.fontSize,bold:b.bold,journalStyle:b.journalStyle,text:b.text?.slice(0,60),rows:b.rows?.length,cellImages:b.cellImages?.length||0,headerRows:b.headerRows,columns:b.rows?.[0]?.length})),
-   rules:['正文、公式、图片与注释内容必须保留。','apply_typesetting 支持按 role/type/blockIds 批量设置样式。','先 dryRun，再用同修订和返回的 previewHash 提交；整批只有一个修订。','journal 是合并更新，保留未指定字段。','组件角色样式显式修改会覆盖期刊模板；页脚 {page} 代表页码。','校样质量阻断不得表述为发印通过。']};
+   rules:['正文、公式、图片与注释内容必须保留。','apply_typesetting 支持按 role/type/blockIds 批量设置样式。','先 dryRun，再用同修订和返回的 previewHash 提交；整批只有一个修订。','journal 是合并更新，保留未指定字段。','组件角色样式显式修改会覆盖期刊模板；页脚 {page} 代表页码。','journal.annotations 可独立设置脚注缩进/标签宽度、参考文献栏数/栏距/悬挂缩进、括号及字体；roleStyles.article-note/reference/reference-heading 控制字号与行距（TeX pt）。','按参考样本选择字体方案前，检查 fonts.profiles.annotations；缺字体必须停下，不能自动替换。','首面脚注使用 journal.articleNoteId；上标引用字号仅调整原有上标引用，不把正文行内引用全部上标。','校样质量阻断不得表述为发印通过。']};
  },true);
  add('apply_typesetting','批量修改版式、合并期刊参数、按类型或角色设置组件样式；保留正文/公式/图像/脚注内容。先 dryRun=true 返回 previewHash，提交同一修改时带回该值。支持 responseMode=summary。',typesettingInput,a=>applyTypesetting(store,a));
 }

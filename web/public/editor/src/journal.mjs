@@ -1,5 +1,5 @@
 import {legacySource,vectorSource} from './asset-sources.mjs';
-export const journalRoles=['title-zh','authors-zh','affiliation-zh','abstract-zh','keywords-zh','classification','title-en','authors-en','affiliation-en','abstract-en','keywords-en','citation','article-note','reference'];
+export const journalRoles=['title-zh','authors-zh','affiliation-zh','abstract-zh','keywords-zh','classification','title-en','authors-en','affiliation-en','abstract-en','keywords-en','citation','article-note','reference','reference-heading'];
 export function validateJournal(raw,blocks,notes=[]){
   if(raw===undefined){if(blocks.some(b=>b.role&&b.role!=='reference'))throw Error('首面角色须启用期刊模板。');return undefined;}
   if(!raw||raw.template!=='cn-academic')throw Error('不支持的期刊模板。');
@@ -13,6 +13,17 @@ export function validateJournal(raw,blocks,notes=[]){
   if(raw.captionBold!==undefined){if(typeof raw.captionBold!=='boolean')throw Error('题注字重无效。');config.captionBold=raw.captionBold;}
   if(raw.headSepMm!==undefined){if(!Number.isFinite(raw.headSepMm)||raw.headSepMm<2||raw.headSepMm>12)throw Error('页眉间距无效。');config.headSepMm=raw.headSepMm;}
   if(raw.yearSuffix!==undefined){if(typeof raw.yearSuffix!=='string'||raw.yearSuffix.length>5)throw Error('年份后缀无效。');config.yearSuffix=raw.yearSuffix;}
+  if(raw.annotations!==undefined){
+    if(!raw.annotations||typeof raw.annotations!=='object'||Array.isArray(raw.annotations))throw Error('注释引用样式无效。');
+    config.annotations={};
+    const choices={fontSet:['inherit','founder-sample'],noteMarker:['hidden','source'],referenceLabelStyle:['source','fullwidth']};
+    const ranges={noteRuleWidthMm:[0,100],noteRuleThicknessPt:[.1,2],noteRuleAfterPt:[0,20],citationInlineSize:[5,24],citationSuperscriptSize:[4,12],citationRisePt:[0,8],noteIndentMm:[0,20],noteLabelWidthMm:[0,30],referenceIndentMm:[0,20],referenceColumns:[1,4],referenceGapMm:[3,20]};
+    for(const [key,value] of Object.entries(raw.annotations)){
+      if(choices[key]){if(!choices[key].includes(value))throw Error('注释引用选项无效：'+key);}
+      else {const r=ranges[key];if(!r||!Number.isFinite(value)||value<r[0]||value>r[1]||key==='referenceColumns'&&!Number.isInteger(value))throw Error('注释引用数值无效：'+key);}
+      config.annotations[key]=value;
+    }
+  }
   if(raw.roleStyles!==undefined){
     if(!raw.roleStyles||Array.isArray(raw.roleStyles)||typeof raw.roleStyles!=='object')throw Error('期刊角色样式无效。');
     config.roleStyles={};

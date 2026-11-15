@@ -2,6 +2,7 @@
 export function journalFontProblems(document, inventory){
  if(!inventory?.profiles)return [];
  const j=document.journal||{},choices={cjk:document.layout?.fontSet||inventory.defaultCjkFontSet||'windows',latin:j.latinFont||'tex-default',math:j.mathFont||'tex-default',bodyWeight:j.bodyWeight||'regular'};
+ if(j.annotations?.fontSet&&j.annotations.fontSet!=='inherit')choices.annotations=j.annotations.fontSet;
  const problems=[];
  for(const [category,key] of Object.entries(choices)){
   const profile=inventory.profiles[category]?.[key];

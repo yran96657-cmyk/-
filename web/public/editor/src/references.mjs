@@ -22,6 +22,6 @@ export function materializeReferences(input){
     if(matches.length)b._generated=true;
   }if(b.rows)b.rows=b.rows.map(r=>r.map(resolve));}
   for(const n of doc.notes)n.text=resolve(n.text);
-  if(doc.bibliography.length){doc.blocks.push({id:'_bibliography-heading',type:'heading',text:'参考文献',level:1,_generated:true});doc.bibliography.forEach((b,i)=>doc.blocks.push({id:`_bibliography-${b.id}`,type:'paragraph',text:`[${i+1}] ${b.text}`,indent:0,_generated:true}));}
+  if(doc.bibliography.length){doc.blocks.push({id:'_bibliography-heading',type:'heading',text:'参考文献',...(doc.journal?{role:'reference-heading'}:{}),level:1,_generated:true});doc.bibliography.forEach((b,i)=>doc.blocks.push({id:`_bibliography-${b.id}`,type:'paragraph',text:`[${i+1}] ${b.text}`,role:'reference',indent:0,_generated:true}));}
   return doc;
 }

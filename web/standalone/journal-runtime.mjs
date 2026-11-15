@@ -1,16 +1,16 @@
 // Node-only adapter. The browser/Workers bundle never imports child_process.
 import {spawn} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdir,readFile,writeFile,rename,readdir,chmod} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,readdir,chmod} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {documentFingerprint} from '../public/editor/src/project-sync.mjs';
 import {assertJournalFonts} from '../public/editor/src/journal-fonts.mjs';
 import {createIssueStore} from './issue-store.mjs';
+import {atomicJson as atomic} from './atomic-json.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const safeId=value=>{if(!/^[a-zA-Z0-9][\w-]{0,79}$/.test(value))throw Error('INVALID_PROOF_ID');return value;};
-const atomic=async(path,value)=>{await writeFile(path+'.tmp',JSON.stringify(value),{mode:0o600});await rename(path+'.tmp',path);};
 
 export async function createJournalRuntime({directory,python='python3',engineDirectory=fileURLToPath(new URL('../journal-engine/',import.meta.url)),env={},timeoutMs=300000,maxProofs=200}={}){
  const root=resolve(directory);await mkdir(root,{recursive:true,mode:0o700});await chmod(root,0o700);

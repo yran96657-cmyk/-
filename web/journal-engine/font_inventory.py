@@ -14,6 +14,7 @@ PROFILES = {
         'mac': ['Songti SC Regular', 'Songti SC Bold', 'Heiti SC Light', 'Heiti SC Medium', 'Kaiti SC', 'Kaiti SC Bold'],
     },
     'latin': {'tex-default': ['lmroman10-regular.otf'], 'times': ['Times New Roman', 'Times New Roman Bold', 'Times New Roman Italic', 'Times New Roman Bold Italic']},
+    'annotations': {'inherit': [], 'founder-sample': ['FZShuSong-Z01', 'FZHei-B01', 'SimSun', 'Times New Roman', 'Times New Roman Italic', 'Times New Roman Bold', 'Times New Roman Bold Italic']},
     'math': {'tex-default': [], 'stix-two': ['STIX Two Math']},
     'bodyWeight': {'regular': [], 'light': ['Source Han Serif SC Light']},
 }

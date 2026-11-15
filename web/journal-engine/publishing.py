@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import threading
 from contextlib import nullcontext
+from annotation_styles import annotation_preamble,note_body,reference_label
 from journal import prepare_blocks,ROLE_STYLE,FRONT_ROLES,marker,read_positions,side_groups
 
 _LOCK=threading.Lock()
@@ -91,6 +92,7 @@ def build_tex(doc,assets_dir,math_widths=None):
     if layout.get('writingMode','horizontal') not in ('horizontal','horizontal-tb') or layout.get('vertical'): raise ValueError('正式 PDF 暂不支持竖排，请切换横排。')
     blocks,by_id=prepare_blocks(doc)
     journal=doc.get('journal')
+    annotations=(journal or {}).get('annotations',{})
     blocks,side_widths=side_groups(blocks,by_id)
     if side_widths and not journal:raise ValueError('图文并排须启用期刊 PDF 模板。')
     def render_math(value):
@@ -169,22 +171,19 @@ def build_tex(doc,assets_dir,math_widths=None):
                     out.append(r'\allowbreak '+marker(object_id,'start')+r'\('+tex+r'\)'+marker(object_id,'end')+(r'\nobreak ' if punctuation else r'\allowbreak '));start=m.end()
                 continue
             if ident in notes:
-                if layout.get('notesMode')=='endnote': out.append(r'\textsuperscript{'+note_markers[ident]+'}'); note_seen.add(ident)
+                if not notes[ident].strip():
+                    out.append(marker('note:'+ident,'start')+r'\textsuperscript{'+note_markers[ident]+'}'+marker('note:'+ident,'end'));note_seen.add(ident)
+                elif layout.get('notesMode')=='endnote': out.append(r'\textsuperscript{'+note_markers[ident]+'}'); note_seen.add(ident)
                 elif table_notes is not None:
                     out.append(r'\textsuperscript{'+note_markers[ident]+'}');table_notes.add(ident);note_seen.add(ident)
-                elif ident in note_seen: out.append(r'\textsuperscript{'+note_markers[ident]+'}')
+                elif ident in note_seen:
+                    if not (journal and journal.get('articleNoteId')==ident and annotations.get('noteMarker','source')=='hidden'):out.append(r'\textsuperscript{'+note_markers[ident]+'}')
                 else:
                     body=escape(notes[ident]);custom=''
                     if journal and journal.get('articleNoteId')==ident:
                         custom=r'\ShuyeArticleNote'
-                        lines=[]
-                        for line in notes[ident].splitlines():
-                            line=line.strip()
-                            label=re.match(r'^([*＊]?(?:收稿日期|基金项目|作者简介|通讯作者|通信作者)[：:])\s*',line)
-                            if label:line_tex=r'\makebox[5.5em][l]{\textbf{'+escape(label[1])+'}}'+escape(line[len(label[0]):])
-                            else:line_tex=r'\hspace*{5.5em}'+escape(line)
-                            lines.append(r'\noindent\hangindent=5.5em\hangafter=1 '+line_tex+r'\par')
-                        body=''.join(lines)
+                        if annotations.get('noteMarker','source')=='hidden':custom+=r'\ShuyeHideNoteMark'
+                        body=note_body(notes[ident],journal,escape,number)
                     body=marker('note:'+ident,'start')+body+marker('note:'+ident,'end')
                     out.append(r'\begingroup'+custom+r'\renewcommand{\thefootnote}{'+note_markers[ident]+r'}\footnote['+str(note_numbers[ident])+']{'+body+r'}\endgroup{}');note_seen.add(ident)
 
@@ -222,6 +221,10 @@ def build_tex(doc,assets_dir,math_widths=None):
             if pos<len(s):chunks.append(segment(pos,len(s)))
             return ''.join(chunks)
         boundaries={0,len(s)}
+        citations=[]
+        if (annotations.get('fontSet')=='founder-sample' or 'citationSuperscriptSize' in annotations or 'citationInlineSize' in annotations) and b.get('role')!='reference':
+            citations=list(re.finditer(r'(?<!\[)[\[［][0-9]+(?:[ ,，、;；–—-]+[0-9]+)*[\]］](?!\])',s))
+            for citation in citations:boundaries.update((citation.start(),citation.end()))
         converted=[]
         for m in marks:
             try: a=offsets.index(int(m['start'])); z=offsets.index(int(m['end']))
@@ -240,8 +243,20 @@ def build_tex(doc,assets_dir,math_widths=None):
             # footnote already owns its marker; nesting its paragraph body in
             # textsuper/subscript either doubles the rise or breaks compilation.
             if re.fullmatch(r'\[\^[^\]\n]+\]',s[a:z]):result.append(t);continue
+            is_citation=any(m.start()<=a and z<=m.end() for m in citations)
+            raised_citation=is_citation and style.get('superscript') and 'citationSuperscriptSize' in annotations
+            if is_citation and annotations.get('fontSet')=='founder-sample':
+                t=re.sub(r'[\[\]［］]',lambda m:r'{\mdseries\upshape\ShuyeReferenceBracket '+('［' if m[0] in '[［' else '］')+'}',t)
+                t=r'{\ShuyeAnnotationLatin '+t+'}'
             for key,cmd in [('bold','textbf'),('italic','textit'),('underline','uline'),('superscript','textsuperscript'),('subscript','textsubscript')]:
-                if style.get(key): t='\\'+cmd+'{'+t+'}'
+                if style.get(key) and not (key=='superscript' and raised_citation): t='\\'+cmd+'{'+t+'}'
+            if raised_citation:
+                citation_size=number(annotations['citationSuperscriptSize'],5.47,4,12)
+                rise=number(annotations.get('citationRisePt'),4.215,0,8)
+                t=r'\raisebox{'+str(rise)+r'pt}{\fontsize{'+str(citation_size)+'}{'+str(citation_size)+r'}\selectfont '+t+'}'
+            if is_citation and not style.get('superscript') and not style.get('subscript') and 'citationInlineSize' in annotations:
+                citation_size=number(annotations['citationInlineSize'],10.33,5,24)
+                t=r'{\fontsize{'+str(citation_size)+'}{'+str(citation_size*1.2)+r'}\selectfont '+t+'}'
             if style.get('bold') is False: t=r'\textmd{'+t+'}'
             if style.get('italic') is False: t=r'\textup{'+t+'}'
             if re.fullmatch(r'#[0-9a-fA-F]{6}',str(style.get('color',''))): t=r'\textcolor[HTML]{'+style['color'][1:]+'}{'+t+'}'
@@ -277,6 +292,7 @@ def build_tex(doc,assets_dir,math_widths=None):
 % and whole text/table sequences become unnecessarily inseparable.
 \makeatletter
 \newcommand{\ShuyeArticleNote}{\long\def\@makefntext##1{##1}}
+\newcommand{\ShuyeHideNoteMark}{\def\@makefnmark{}}
 \newcommand{\ShuyeAfterParagraph}{\if@nobreak\@nobreakfalse\everypar{}\fi}
 \makeatother
 % fancyhdr is activated after geometry so it uses the actual paper width.
@@ -290,6 +306,7 @@ def build_tex(doc,assets_dir,math_widths=None):
     if journal and journal.get('bodyWeight')=='light' and font_set!='source-han':raise ValueError('轻字重正文须使用思源字体方案。')
     if font_set=='source-han':pre+=r'\setCJKmainfont[BoldFont={Source Han Serif SC Bold}]{Source Han Serif SC}\setCJKsansfont[BoldFont={Source Han Sans SC Bold}]{Source Han Sans SC}'+'\n'
     if journal and journal.get('bodyWeight')=='light':pre=pre.replace(']{Source Han Serif SC}',']{Source Han Serif SC Light}')
+    if journal:pre+=annotation_preamble(journal)
     if journal and journal.get('latinFont')=='times':pre+=r'\setmainfont{Times New Roman}'+'\n'
     # Fandol lacks some traditional Chinese characters. Prefer installed open
     # fonts as fallbacks; never replace the source character with a lookalike.
@@ -319,7 +336,10 @@ def build_tex(doc,assets_dir,math_widths=None):
         # time inflates body/front-matter/table spacing and changes pagination.
         pre+=r'\linespread{1}'+'\n'
         pre+=r'\setlength{\heavyrulewidth}{.75pt}\setlength{\lightrulewidth}{.25pt}'+'\n'
-        pre+=r'\setlength{\parskip}{0pt}\setlength{\skip\footins}{5pt}\renewcommand{\footnoterule}{\kern-3pt\hrule width81pt height.3pt\kern2.7pt}'+'\n'
+        rule_width=str(number(annotations['noteRuleWidthMm'],0,0,100))+'mm' if 'noteRuleWidthMm' in annotations else '81pt'
+        rule_weight=number(annotations.get('noteRuleThicknessPt'),.3,.1,2)
+        rule_after=number(annotations.get('noteRuleAfterPt'),3-rule_weight,0,20)
+        pre+=r'\setlength{\parskip}{0pt}\setlength{\skip\footins}{5pt}\renewcommand{\footnoterule}{\kern-3pt\hrule width'+rule_width+' height'+str(rule_weight)+'pt'+r'\kern'+str(rule_after)+'pt}'+'\n'
         pre+=r'\makeatletter\renewcommand\footnotesize{\@setfontsize\footnotesize{6.9pt}{8pt}}\makeatother'+'\n'
     if any(b.get('floatPlacement')=='top' for b in blocks):
         pre+=r'\renewcommand{\dbltopfraction}{.9}\renewcommand{\textfraction}{.05}\makeatletter\setlength{\@fptop}{0pt}\setlength{\@dblfptop}{0pt}\makeatother'+'\n'
@@ -366,10 +386,10 @@ def build_tex(doc,assets_dir,math_widths=None):
                 if not re.fullmatch(r'[-\w]{1,80}',str(m.get('id',''))):continue
                 measure_id=m['id'] if b.get('type')=='equation' else b.get('id','')+':'+m['id']
                 pre+=r'\setbox0=\hbox{$'+(r'\displaystyle ' if b.get('type')=='equation' else '')+render_math(m['text'])+r'$}\typeout{SHUYEWIDTH:'+measure_id+r':\the\wd0}'+'\n'
-    content=[]; incols=False
+    content=[]; incols=False;flow_cols=cols
     def columns(on,minimum=50):
         nonlocal incols
-        if cols>1 and on!=incols: content.append(r'\begin{multicols}{'+str(cols)+r'}[]['+str(round(minimum,2))+r'pt]\raggedcolumns' if on else r'\end{multicols}'); incols=on
+        if flow_cols>1 and on!=incols: content.append(r'\begin{multicols}{'+str(flow_cols)+r'}[]['+str(round(minimum,2))+r'pt]\raggedcolumns' if on else r'\end{multicols}'); incols=on
     if not journal:columns(True)
     planned=[]
     for source_index,b in enumerate(blocks):
@@ -422,13 +442,15 @@ def build_tex(doc,assets_dir,math_widths=None):
     # A deferred body figure must never interrupt the reference list. Include
     # its explicit heading in the boundary, so the heading stays with item 1.
     reference_start=None
-    if journal and any(b.get('floatPlacement')=='top' for b in blocks):
-        reference_start=next((i for i,b in enumerate(blocks) if b.get('role')=='reference'),None)
+    if journal:
+        reference_start=next((i for i,b in enumerate(blocks) if b.get('role') in ('reference','reference-heading')),None)
         if reference_start and re.fullmatch(r'(?:参考文献|References)\s*[:：]?',blocks[reference_start-1].get('text','').strip(),re.I):reference_start-=1
     paragraph_open=False;side=None
     for block_num,b in enumerate(blocks):
         if block_num==reference_start:
             columns(False)
+            flow_cols=int(number(annotations.get('referenceColumns'),cols,1,4))
+            content.append(r'\setlength{\columnsep}{'+str(number(annotations.get('referenceGapMm'),values['gap'],3,20))+'mm}')
             # No forced page break when the float queues are already empty.
             content.append(r'\makeatletter\ifx\@deferlist\@empty\ifx\@dbldeferlist\@empty\else\clearpage\fi\else\clearpage\fi\makeatother')
         if b['type']=='sideStart':
@@ -448,7 +470,9 @@ def build_tex(doc,assets_dir,math_widths=None):
             if paragraph_open:raise ValueError('并排范围不能截断公式引导段。')
             side['split']=len(content)
             b={**b,'width':100,'wrap':'none'}
-        role=b.get('role');front=bool(journal and role in FRONT_ROLES)
+        role=b.get('role')
+        if block_num==reference_start and re.fullmatch(r'(?:参考文献|References)\s*[:：]?',b.get('text','').strip(),re.I):role='reference-heading'
+        front=bool(journal and role in FRONT_ROLES)
         floating=b.get('floatPlacement')=='top'
         if floating and (not journal or cols<2 or b.get('placement')!='full-width' or b.get('type') not in ('image','table') or side):raise ValueError('页顶浮动仅支持期刊双栏中的通栏图或短表。')
         heading_space=values['fontSize']*values['lineHeight']*4
@@ -468,7 +492,8 @@ def build_tex(doc,assets_dir,math_widths=None):
             if term in str(b.get('text','')) and b.get('type')!='index':
                 label='idx-'+str(term_num)+'-'+str(block_num); block_labels+=r'\phantomsection\label{'+label+'}'
         active_block_id=b.get('id','')
-        active_width=(values['width']-values['inner']-values['outer']-(values['gap']*(cols-1) if incols else 0))/(cols if incols else 1)*72.27/25.4
+        active_gap=number(annotations.get('referenceGapMm'),values['gap'],3,20) if reference_start is not None and block_num>=reference_start else values['gap']
+        active_width=(values['width']-values['inner']-values['outer']-(active_gap*(flow_cols-1) if incols else 0))/(flow_cols if incols else 1)*72.27/25.4
         if side:active_width=active_width*(side['image']['width']/100 if b.get('_sideImage') else 1-side['image']['width']/100)-(0 if b.get('_sideImage') else 3*72.27/25.4)
         typ=b.get('type')
         formulas=b.get('inlineMath',[]);formula_ids=[m.get('id') for m in formulas]
@@ -493,6 +518,8 @@ def build_tex(doc,assets_dir,math_widths=None):
                 family=custom.get('fontFamily','serif')
                 if family not in ('serif','sans','kai'):raise ValueError('角色字体无效。')
                 family_cmd=r'\sffamily ' if family=='sans' else r'\kaifamily ' if family=='kai' else ''
+                if annotations.get('fontSet')=='founder-sample' and role in ('reference','reference-heading','citation','article-note'):
+                    family_cmd=r'\ShuyeAnnotationFont '+(r'\ShuyeAnnotationLabel ' if role=='reference-heading' else '')
                 align_cmd={'center':r'\centering ','left':r'\raggedright ','right':r'\raggedleft ','justify':''}[alignment]
                 indent=r'\setlength{\parindent}{13.8pt}' if role in ('abstract-zh','keywords-zh','abstract-en','keywords-en') else r'\setlength{\parindent}{0pt}'
                 if role in ('abstract-zh','keywords-zh'):indent+=r'\leftskip=16pt '
@@ -500,19 +527,22 @@ def build_tex(doc,assets_dir,math_widths=None):
                 after=number(custom.get('spaceAfter'),0,0,24)
                 gap=r'\addvspace{'+str(before)+'pt}' if before else ''
                 if role=='reference':
-                    indent=r'\setlength{\parindent}{0pt}\hangindent=7mm\hangafter=1 '
+                    hanging=str(number(annotations.get('referenceIndentMm'),7,0,20))+'mm'
+                    indent=r'\setlength{\parindent}{0pt}\hangindent='+hanging+r'\hangafter=1 '
                     # Keep styled source bytes/marks intact; only box the visible
                     # numeric label so first and continuation lines align.
                     label=re.match(r'^(\[[0-9]+\]|［[0-9]+］)\s*',b.get('text',''))
                     if label and not b.get('inlineMath') and not b.get('ruby'):
                         cut=len(label[0].encode('utf-16-le'))//2
                         marks=[{**m,'start':max(cut,m['start'])-cut,'end':m['end']-cut} for m in render_source.get('marks',[]) if m.get('end',0)>cut]
-                        text=r'\makebox[7mm][l]{'+escape(label[1])+'}'+styled({**render_source,'text':b['text'][len(label[0]):],'marks':marks})
+                        text=r'\makebox['+hanging+'][l]{'+reference_label(label[1],annotations,escape)+'}'+styled({**render_source,'text':b['text'][len(label[0]):],'marks':marks})
                 # Rendering notes is stateful. Style overrides must not render
                 # and discard the first copy, consuming the only footnote body.
                 if not text:text=styled(render_source)
+                if role=='reference-heading':
+                    gap=(r'\Needspace{'+str(leading+2*number(journal.get('roleStyles',{}).get('reference',{}).get('leading'),14,7,36))+r'pt}' if not incols else '')+gap
                 if role=='classification':text=re.sub(r' {2,}',lambda _:r'\hspace{6em}',text)
-                content.append(r'\par'+gap+'{'+align_cmd+family_cmd+indent+r'\fontsize{'+str(size)+'}{'+str(leading)+r'}\selectfont '+(r'\bfseries ' if bold else '')+r'\leavevmode '+block_labels+text+marker(b.get('id'),'end')+r'\par}\ShuyeAfterParagraph'+(r'\addvspace{'+str(after)+'pt}' if after else ''))
+                content.append(r'\par'+gap+'{'+align_cmd+family_cmd+indent+r'\fontsize{'+str(size)+'}{'+str(leading)+r'}\selectfont '+(r'\bfseries ' if bold else '')+r'\leavevmode '+block_labels+text+marker(b.get('id'),'end')+r'\par}\ShuyeAfterParagraph'+(r'\nobreak' if role=='reference-heading' else '')+(r'\addvspace{'+str(after)+'pt}' if after else '')+(r'\nobreak' if role=='reference-heading' else ''))
                 continue
             text=styled(b)
             if typ=='heading':
@@ -748,6 +778,7 @@ def build_tex(doc,assets_dir,math_widths=None):
         if floating:content.append(r'\end{figure*}')
     columns(False)
     for ident,n in notes.items():
+        if not n.strip():continue
         if ident not in note_seen or layout.get('notesMode')=='endnote':
             if ident not in note_seen: warnings.append('未引用脚注已追加文末：'+ident)
             content.append(r'\par\textbf{注 '+note_markers[ident]+'} '+marker('note:'+ident,'start')+escape(n)+marker('note:'+ident,'end'))

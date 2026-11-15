@@ -47,7 +47,7 @@ export async function startServer({directory,publicDirectory,origin,basePath='/s
    if(req.method==='POST'&&!bearer&&req.headers.origin!==site.origin){json(403,{error:'ORIGIN_REQUIRED'});return;}
    let data;
    const body=async(limit=30*1024*1024)=>{if(data)return data;let n=0,chunks=[];for await(const c of req){n+=c.length;if(n>limit)throw Error('REQUEST_TOO_LARGE');chunks.push(c);}data=Buffer.concat(chunks);return data;};
-   if(path==='/healthz'){json(200,{status:'ok',version:'0.8.0',storage:'sqlite-files'});return;}
+   if(path==='/healthz'){json(200,{status:'ok',version:'0.8.1',storage:'sqlite-files'});return;}
    if(path==='/config.js'){send(200,`globalThis.__SHUYE_BASE__=${JSON.stringify(basePath)};`,'text/javascript');return;}
    if(path==='/api/session'){json(200,{user:owner||null});return;}
    if(path==='/signin-with-chatgpt'||path==='/login'){

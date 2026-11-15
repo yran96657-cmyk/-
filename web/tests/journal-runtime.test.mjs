@@ -51,7 +51,7 @@ test('journal timeout and graceful shutdown persist failure and allow recovery',
 test('issue task discovery survives restart, stays owner-scoped and verifies chunk integrity',async()=>{
  const f=await fixture();try{
   const input={projectId:'issue-a',revision:1,document:{articles:[record()]}};
-  const m=await f.runtime.start('alice',input,'issue');await completed(f.runtime,m.proofId);
+  const m=await f.runtime.start('alice',input,'issue');const done=await completed(f.runtime,m.proofId);assert.equal(done.status,'complete',JSON.stringify(done));
   assert.equal(await f.runtime.latestIssueProof('alice','issue-a'),m.proofId);
   assert.equal(await f.runtime.latestIssueProof('bob','issue-a'),null);
   const dir=join(f.opts.directory,hash('alice'),m.proofId),meta=await f.runtime.status('alice',m.proofId),bytes=Buffer.from('editable document');

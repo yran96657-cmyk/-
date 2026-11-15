@@ -14,7 +14,7 @@ ROLE_STYLE={
  'title-en':(9.3,12,'center',True),'authors-en':(8,11,'center',False),
  'affiliation-en':(6.9,10,'center',False),'abstract-en':(6.9,11.6,'justify',False),
  'keywords-en':(6.9,11.6,'justify',False),'citation':(6.9,11.5,'left',False),
- 'article-note':(6.9,8,'left',False),'reference':(6.94,8.5,'justify',False)}
+ 'article-note':(6.9,8,'left',False),'reference':(6.94,8.5,'justify',False),'reference-heading':(11.8,16,'left',False)}
 
 def prepare_blocks(doc):
     blocks=doc.get('blocks',[]);by_id={b.get('id'):b for b in blocks};caption_ids=set();anchored=set()

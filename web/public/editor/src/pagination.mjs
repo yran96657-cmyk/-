@@ -4,7 +4,7 @@ import { buildTableElement, cellDisplayMarks, tableRowGroups, headerRowCount } f
 import { buildRuby } from './ruby.mjs';
 import {journalPreviewStyle,journalFrontMatter} from './journal-preview.mjs';
 const MM = 96 / 25.4;
-export const families = {serif:'SimSun,"Songti SC",serif',sans:'"Microsoft YaHei",sans-serif',kai:'KaiTi,STKaiti,serif'};
+export const families = {'annotation':'"Times New Roman","FZShuSong-Z01",serif','annotation-label':'"Times New Roman","FZHei-B01",sans-serif',serif:'SimSun,"Songti SC",serif',sans:'"Microsoft YaHei",sans-serif',kai:'KaiTi,STKaiti,serif'};
 const refs = text => [...text.matchAll(/\[\^([-\w]+)\]/g)].map(m=>m[1]);
 export function styleBlock(el,b,l,continued=false) {
   el.className=`block ${b.type}${continued?' fragment':''}`;
@@ -51,7 +51,7 @@ function inline(el,b,l,text,start=0) {
     const note=notes.find(n=>n.index===begin&&n[0].length===end-begin);
     if(note) {
       const index=(l._notes||[]).findIndex(n=>n.id===note[1]);
-      span.className='note-reference';span.dataset.number=index<0?'?':(l._notes[index].marker??index+1);
+      span.className='note-reference';span.dataset.number=note[1]===l._journal?.articleNoteId&&l._journal?.annotations?.noteMarker==='hidden'?'':index<0?'?':(l._notes[index].marker??index+1);
       span.title=index<0?'注释未定义':l._notes[index].text;
     }
     const formula=formulas.find(m=>m.index===begin&&m[0].length===end-begin);
@@ -66,7 +66,23 @@ function inline(el,b,l,text,start=0) {
 }
 export function notesElement(ids,l) {
   const el=document.createElement('div');el.className='page-notes';
-  for(const id of ids){const i=l._notes.findIndex(n=>n.id===id);if(i<0)continue;const p=document.createElement('div');p.textContent=`${l._notes[i].marker??i+1}　${l._notes[i].text}`;el.append(p);}
+  for(const id of ids){
+    const i=l._notes.findIndex(n=>n.id===id);if(i<0)continue;
+    const p=document.createElement('div'),j=l._journal;
+    if(id===j?.articleNoteId){
+      const a=j.annotations||{},style=journalPreviewStyle({role:'article-note'},j);
+      Object.assign(p.style,style,{fontFamily:families[style.fontFamily],marginLeft:`${a.noteIndentMm??0}mm`});
+      for(const text of l._notes[i].text.split('\n')){
+        const row=document.createElement('div'),match=text.match(/^([*＊∗†‡]?)(收稿日期|基金项目|作者简介|通讯作者|通信作者)([：:])\s*/);
+        const width=a.noteLabelWidthMm!==undefined?`${a.noteLabelWidthMm}mm`:'5.5em';
+        row.style.paddingLeft=width;row.style.textIndent=`calc(-1 * ${width})`;
+        if(match){const label=document.createElement('span');label.style.display='inline-block';label.style.width=width;label.style.textIndent='0';label.style.fontFamily=a.fontSet==='founder-sample'?families['annotation-label']:families.sans;label.textContent=match[1]+match[2]+match[3];row.append(label,document.createTextNode(text.slice(match[0].length)));}
+        else {row.style.textIndent='0';row.textContent=text;}
+        p.append(row);
+      }
+    }else p.textContent=`${l._notes[i].marker??i+1}　${l._notes[i].text}`;
+    el.append(p);
+  }
   return el;
 }
 export function blockElement(b,l,text=b.text,continued=false,part={}) {

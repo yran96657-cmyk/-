@@ -15,7 +15,16 @@ import {documentFingerprint} from '../public/editor/src/project-sync.mjs';
 import {createHash} from 'node:crypto';
 import {imageFit} from '../lib/image-fit.mjs';
 import {compactQuality,runApiAgent} from '../standalone/api-agent.mjs';
+import {resetChangedAnnotationSizes} from '../public/editor/src/journal-style.mjs';
 const hash=d=>createHash('sha256').update(documentFingerprint(d)).digest('hex');
+test('template reference size overrides stale block sizes while retaining content and other styling',()=>{
+ const doc={blocks:[{id:'r',role:'reference',text:'[1] Source',journalStyle:{fontSize:8.5,bold:false,align:'left'}},{id:'body',text:'Keep body',journalStyle:{fontSize:12}}]};
+ resetChangedAnnotationSizes(doc,{roleStyles:{reference:{fontSize:8.5}}},{reference:{fontSize:8.853075}});
+ assert.deepEqual(doc.blocks,[{id:'r',role:'reference',text:'[1] Source',journalStyle:{bold:false,align:'left'}},{id:'body',text:'Keep body',journalStyle:{fontSize:12}}]);
+ const same=structuredClone(doc);same.blocks[0].journalStyle.fontSize=9;
+ resetChangedAnnotationSizes(same,{roleStyles:{reference:{fontSize:8.853075}}},{reference:{fontSize:8.853075}});
+ assert.equal(same.blocks[0].journalStyle.fontSize,9);
+});
 test('one page inspection includes real footer coordinates without repeated model pagination',async()=>{
  let round=0;const offsets=[],t={projectId:'paper',revision:1,proofId:'proof',goal:'test',apiModel:'deepseek'};
  const store={owner:'alice',apiModels:{request:async(_,__,body)=>{
@@ -40,6 +49,26 @@ test('uncertain writes are recoverable only when revision and entire source dige
  }
 });
 async function fixture(t){const dir=await mkdtemp(join(tmpdir(),'shuye-api-')),storage=await openStorage(join(dir,'data')),store=new CloudStore(storage.DB,storage.BUCKET,'alice');await store.create('paper',makeTemplate('journal','Title'));t.after(async()=>{storage.close();await rm(dir,{recursive:true,force:true});});return {dir,store,storage};}
+test('annotation configuration survives MCP preview, commit, reload and partial merge',async t=>{
+ const {store}=await fixture(t);
+ const args={projectId:'paper',expectedRevision:1,journal:{annotations:{referenceColumns:2,noteIndentMm:6.13,referenceLabelStyle:'fullwidth'},roleStyles:{'article-note':{fontSize:8.853075,leading:10.302991875},'reference-heading':{fontSize:11.8041}}}};
+ const preview=await callTool(store,'apply_typesetting',{...args,dryRun:true});
+ await callTool(store,'apply_typesetting',{...args,previewHash:preview.previewHash});
+ const next={projectId:'paper',expectedRevision:2,journal:{annotations:{referenceIndentMm:9}}};
+ const second=await callTool(store,'apply_typesetting',{...next,dryRun:true});
+ await callTool(store,'apply_typesetting',{...next,previewHash:second.previewHash});
+ const result=await store.get('paper');
+ assert.deepEqual(result.document.journal.annotations,{referenceColumns:2,noteIndentMm:6.13,referenceLabelStyle:'fullwidth',referenceIndentMm:9});
+ assert.equal(result.document.journal.roleStyles['article-note'].leading,10.302991875);
+ for(const annotations of [{referenceColumns:1.5},{noteIndentMm:-1},{fontSet:'fake'},{referenceGapMm:99}])await assert.rejects(()=>callTool(store,'apply_typesetting',{projectId:'paper',expectedRevision:3,dryRun:true,journal:{annotations}}));
+ assert.equal((await store.get('paper')).revision,3);
+});
+test('sample font profile cannot silently fall back or commit when unavailable',async t=>{
+ const {store}=await fixture(t);
+ store.journalRuntime={capabilities:{environment:{fonts:{defaultCjkFontSet:'fandol',profiles:{cjk:{fandol:{available:true}},latin:{'tex-default':{available:true}},math:{'tex-default':{available:true}},bodyWeight:{regular:{available:true}},annotations:{'founder-sample':{available:false,missingFonts:['FZShuSong-Z01']}}}}}}};
+ await assert.rejects(()=>callTool(store,'apply_typesetting',{projectId:'paper',expectedRevision:1,dryRun:true,journal:{annotations:{fontSet:'founder-sample'}}}),/FZShuSong-Z01/);
+ assert.equal((await store.get('paper')).revision,1);
+});
 test('batch preview binds entire source/revision and preserves content; JSON property order is irrelevant',async t=>{
  const {store}=await fixture(t),initial=await store.get('paper');
  const args={projectId:'paper',expectedRevision:1,layout:{header:'Agent',footer:'{page}'},styles:[{role:'title-zh',patch:{fontSize:18,bold:true,align:'center'}},{type:'heading',patch:{fontSize:12}}]};
