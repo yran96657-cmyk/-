@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import threading
 from contextlib import nullcontext
-from annotation_styles import annotation_preamble,note_body,reference_label
+from annotation_styles import annotation_preamble,note_body,reference_label,reference_text
 from journal import prepare_blocks,ROLE_STYLE,FRONT_ROLES,marker,read_positions,side_groups
 
 _LOCK=threading.Lock()
@@ -149,10 +149,11 @@ def build_tex(doc,assets_dir,math_widths=None):
     if journal and journal.get('articleNoteId') and journal['articleNoteId'] not in notes:raise ValueError('首面脚注引用失效。')
     note_numbers={ident:i+1 for i,ident in enumerate(notes)}
     note_markers={str(n.get('id')):escape(str(n.get('marker',note_numbers.get(str(n.get('id')),'')))) for n in doc.get('notes',[]) if isinstance(n,dict)}
-    def plain(s,formulas=None,table_notes=None,owner_id=None):
+    def plain(s,formulas=None,table_notes=None,owner_id=None,reference=False):
+        text_escape = (lambda text: reference_text(text, escape)) if reference and annotations.get('fontSet')=='founder-sample' else escape
         out=[]; start=0
         for m in re.finditer(r'\[\^([^\]\n]+)\]|\[\[math:([-\w]+)\]\]',s):
-            out.append(escape(s[start:m.start()])); ident=m.group(1)
+            out.append(text_escape(s[start:m.start()])); ident=m.group(1)
             if m.group(2):
                 if m.group(2) not in (formulas or {}): raise ValueError('缺少行内公式定义：'+m.group(2))
                 tex=render_math(formulas[m.group(2)]);object_id=(owner_id or active_block_id)+':'+m.group(2)
@@ -189,7 +190,7 @@ def build_tex(doc,assets_dir,math_widths=None):
 
             else: out.append(escape(m.group(0))); warnings.append('缺少脚注内容：'+ident)
             start=m.end()
-        out.append(escape(s[start:])); return ''.join(out)
+        out.append(text_escape(s[start:])); return ''.join(out)
     def styled(b,table_notes=None):
         s=str(b.get('text','')); marks=b.get('marks',[])
         if journal and journal.get('normalizeTypography',True):marks=[{k:v for k,v in m.items() if k not in ('fontFamily','fontSize')} for m in marks];marks=[m for m in marks if len(m)>2]
@@ -221,6 +222,8 @@ def build_tex(doc,assets_dir,math_widths=None):
             if pos<len(s):chunks.append(segment(pos,len(s)))
             return ''.join(chunks)
         boundaries={0,len(s)}
+        reference_hints=dict(b.get('_referenceBreaks',[]))
+        boundaries.update(reference_hints)
         citations=[]
         if (annotations.get('fontSet')=='founder-sample' or 'citationSuperscriptSize' in annotations or 'citationInlineSize' in annotations) and b.get('role')!='reference':
             citations=list(re.finditer(r'(?<!\[)[\[［][0-9]+(?:[ ,，、;；–—-]+[0-9]+)*[\]］](?!\])',s))
@@ -238,7 +241,7 @@ def build_tex(doc,assets_dir,math_widths=None):
             style={}
             for x,y,m in converted:
                 if x<=a and z<=y: style.update(m)
-            t=plain(s[a:z],{m['id']:m['text'] for m in b.get('inlineMath',[])},table_notes,owner_id=b.get('id'))
+            t=plain(s[a:z],{m['id']:m['text'] for m in b.get('inlineMath',[])},table_notes,owner_id=b.get('id'),reference=b.get('role')=='reference')
             # Word formats footnote-reference runs as superscripts. The TeX
             # footnote already owns its marker; nesting its paragraph body in
             # textsuper/subscript either doubles the rise or breaks compilation.
@@ -264,6 +267,8 @@ def build_tex(doc,assets_dir,math_widths=None):
             if 'fontSize' in style:
                 size=number(style['fontSize'],11,5,72); t=r'{\fontsize{'+str(size)+'}{'+str(size*1.3)+r'}\selectfont '+t+'}'
             result.append(t)
+            if z in reference_hints:
+                result.append((r'\mbox{-}' if reference_hints[z] else r'\unskip')+r'\linebreak{}')
         return ''.join(result)
     pre=r'''\documentclass[twoside,UTF8,fontset=SHUYEFONTSET]{ctexart}
 \usepackage{geometry,fontspec,graphicx,longtable,array,booktabs,amsmath,amssymb,fancyhdr,multicol,xcolor,multirow,needspace}
@@ -520,6 +525,7 @@ def build_tex(doc,assets_dir,math_widths=None):
                 family_cmd=r'\sffamily ' if family=='sans' else r'\kaifamily ' if family=='kai' else ''
                 if annotations.get('fontSet')=='founder-sample' and role in ('reference','reference-heading','citation','article-note'):
                     family_cmd=r'\ShuyeAnnotationFont '+(r'\ShuyeAnnotationLabel ' if role=='reference-heading' else '')
+                spacing_cmd=r'\ShuyeReferenceSpacing ' if annotations.get('fontSet')=='founder-sample' and role=='reference' else ''
                 align_cmd={'center':r'\centering ','left':r'\raggedright ','right':r'\raggedleft ','justify':''}[alignment]
                 indent=r'\setlength{\parindent}{13.8pt}' if role in ('abstract-zh','keywords-zh','abstract-en','keywords-en') else r'\setlength{\parindent}{0pt}'
                 if role in ('abstract-zh','keywords-zh'):indent+=r'\leftskip=16pt '
@@ -535,14 +541,22 @@ def build_tex(doc,assets_dir,math_widths=None):
                     if label and not b.get('inlineMath') and not b.get('ruby'):
                         cut=len(label[0].encode('utf-16-le'))//2
                         marks=[{**m,'start':max(cut,m['start'])-cut,'end':m['end']-cut} for m in render_source.get('marks',[]) if m.get('end',0)>cut]
-                        text=r'\makebox['+hanging+'][l]{'+reference_label(label[1],annotations,escape)+'}'+styled({**render_source,'text':b['text'][len(label[0]):],'marks':marks})
+                        remainder=b['text'][len(label[0]):]
+                        render_reference={**render_source,'text':remainder,'marks':marks}
+                        from reference_layout import reference_breaks,explicit_reference_breaks
+                        hints=explicit_reference_breaks(b,label[0])
+                        if hints is None and annotations.get('fontSet')=='founder-sample':
+                            measured_marks=[{k:v for k,v in m.items() if k not in ('fontSize','fontFamily')} for m in marks] if journal.get('normalizeTypography',True) else marks
+                            hints=reference_breaks(remainder,(active_width-number(annotations.get('referenceIndentMm'),7,0,20)*72.27/25.4)*72/72.27,size*72/72.27,measured_marks)
+                        if hints is not None:render_reference['_referenceBreaks']=hints
+                        text=r'\makebox['+hanging+'][l]{'+reference_label(label[1],annotations,escape)+'}'+styled(render_reference)
                 # Rendering notes is stateful. Style overrides must not render
                 # and discard the first copy, consuming the only footnote body.
                 if not text:text=styled(render_source)
                 if role=='reference-heading':
                     gap=(r'\Needspace{'+str(leading+2*number(journal.get('roleStyles',{}).get('reference',{}).get('leading'),14,7,36))+r'pt}' if not incols else '')+gap
                 if role=='classification':text=re.sub(r' {2,}',lambda _:r'\hspace{6em}',text)
-                content.append(r'\par'+gap+'{'+align_cmd+family_cmd+indent+r'\fontsize{'+str(size)+'}{'+str(leading)+r'}\selectfont '+(r'\bfseries ' if bold else '')+r'\leavevmode '+block_labels+text+marker(b.get('id'),'end')+r'\par}\ShuyeAfterParagraph'+(r'\nobreak' if role=='reference-heading' else '')+(r'\addvspace{'+str(after)+'pt}' if after else '')+(r'\nobreak' if role=='reference-heading' else ''))
+                content.append(r'\par'+gap+'{'+align_cmd+family_cmd+indent+r'\fontsize{'+str(size)+'}{'+str(leading)+r'}\selectfont '+spacing_cmd+(r'\bfseries ' if bold else '')+r'\leavevmode '+block_labels+text+marker(b.get('id'),'end')+r'\par}\ShuyeAfterParagraph'+(r'\nobreak' if role=='reference-heading' else '')+(r'\addvspace{'+str(after)+'pt}' if after else '')+(r'\nobreak' if role=='reference-heading' else ''))
                 continue
             text=styled(b)
             if typ=='heading':

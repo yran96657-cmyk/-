@@ -69,6 +69,22 @@ test('sample font profile cannot silently fall back or commit when unavailable',
  await assert.rejects(()=>callTool(store,'apply_typesetting',{projectId:'paper',expectedRevision:1,dryRun:true,journal:{annotations:{fontSet:'founder-sample'}}}),/FZShuSong-Z01/);
  assert.equal((await store.get('paper')).revision,1);
 });
+
+test('MCP reference break correction previews, persists and rejects stale source',async t=>{
+ const {store}=await fixture(t),doc=makeTemplate('journal','References');
+ const text='[1] AUTHOR. A journal article. 2026, 8: 1-9.';
+ doc.blocks.push({id:'ref-one',type:'paragraph',role:'reference',text});
+ await store.create('references',doc);
+ const referenceBreaks={sourceText:text,breaks:[{offset:text.indexOf('journal')+4,hyphen:true}]};
+ const args={projectId:'references',expectedRevision:1,styles:[{blockIds:['ref-one'],patch:{referenceBreaks}}]};
+ const preview=await callTool(store,'apply_typesetting',{...args,dryRun:true});
+ assert.equal((await store.get('references')).revision,1);
+ await callTool(store,'apply_typesetting',{...args,previewHash:preview.previewHash});
+ const final=await store.get('references'),ref=final.document.blocks.find(b=>b.id==='ref-one');
+ assert.equal(ref.text,text);assert.deepEqual(ref.referenceBreaks,referenceBreaks);
+ await assert.rejects(()=>callTool(store,'apply_typesetting',{...args,expectedRevision:2,dryRun:true,styles:[{blockIds:['ref-one'],patch:{referenceBreaks:{...referenceBreaks,sourceText:'stale'}}}]}),/REFERENCE_BREAKS_SOURCE_CHANGED/);
+ assert.equal((await store.get('references')).revision,2);
+});
 test('batch preview binds entire source/revision and preserves content; JSON property order is irrelevant',async t=>{
  const {store}=await fixture(t),initial=await store.get('paper');
  const args={projectId:'paper',expectedRevision:1,layout:{header:'Agent',footer:'{page}'},styles:[{role:'title-zh',patch:{fontSize:18,bold:true,align:'center'}},{type:'heading',patch:{fontSize:12}}]};

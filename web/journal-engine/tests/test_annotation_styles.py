@@ -1,5 +1,6 @@
 """Real-PDF regressions for publication notes and independently flowing references."""
 import unittest
+from copy import deepcopy
 from io import BytesIO
 from statistics import median
 import pdfplumber
@@ -88,5 +89,67 @@ class AnnotationStyleTests(unittest.TestCase):
         with pdfplumber.open(BytesIO(result['pdf'])) as pdf:
             labels=[w for p in pdf.pages for w in p.extract_words() if w['text'].startswith('[')]
             self.assertTrue(labels);self.assertTrue(all(w['x0']<100 for w in labels))
+
+    def test_sample_note_symbols_punctuation_and_reference_types_are_render_only(self):
+        from font_inventory import probe_fonts
+        if not probe_fonts()['profiles']['annotations']['founder-sample']['available']:
+            self.skipTest('Licensed sample fonts are not installed')
+        source=self.source();source['journal']['annotations']['fontSet']='founder-sample'
+        source['notes'][0]['text']='∗基金项目：基金 12461040.\n†作者简介: 张杰(1998–), 女, 助教, 硕士.\n‡通讯作者: 尹建东(1975–), 男, 教授, 博士. E-mail: jiandongyin@ncu.edu.cn.'
+        source['blocks'][-1]['text']='[14] AUTHOR L A. Original title[J/OL]. Journal, 2026, 8(3): 1-9.'
+        before=deepcopy(source);result=render_pdf(source)
+        self.assertEqual(source,before)
+        self.assertEqual(result['compileMessages'],[])
+        with pdfplumber.open(BytesIO(result['pdf'])) as pdf:
+            # Optical bracket overhang can precede the previous glyph's x0.
+            # PDF text drawing order preserves semantic character order.
+            text=''.join(c['text'] for p in pdf.pages for c in p.chars).replace(' ','')
+            self.assertIn('*通讯作者：尹建东（1975–），男，教授，博士。E-mail：jiandongyin@ncu.edu.cn.',text)
+            self.assertNotIn('†作者',text);self.assertNotIn('‡通讯',text)
+            self.assertIn('AUTHORLA.Originaltitle［J/OL］.',text)
+            self.assertIn('12461040',text)
+
+    def test_reference_display_does_not_treat_math_or_urls_as_document_types(self):
+        from annotation_styles import reference_text,note_text
+        from publishing import escape
+        value='A [x] https://example.org/[J] and DOI 10.1000/a_b. Title[J].'
+        rendered=reference_text(value,escape)
+        self.assertIn('[x]',rendered)
+        self.assertIn(escape('https://example.org/[J]'),rendered)
+        self.assertIn(r'a\_b',rendered)
+        self.assertIn('ShuyeReferenceBracket ［',rendered)
+        self.assertEqual(note_text('作者（2000—） ， 女。 E-mail： a@example.org',escape),'作者（2000—），女。E-mail：a@example.org')
+
+    def test_note_parentheses_do_not_expand_the_birth_year_spacing(self):
+        from font_inventory import probe_fonts
+        if not probe_fonts()['profiles']['annotations']['founder-sample']['available']:
+            self.skipTest('Licensed sample fonts are not installed')
+        source=self.source();source['journal']['annotations']['fontSet']='founder-sample'
+        source['notes'][0]['text']='作者简介：彭绍琴（1962—），女，教授，博士。'
+        original=deepcopy(source);result=render_pdf(source)
+        self.assertEqual(source,original);self.assertEqual(result['compileMessages'],[])
+        with pdfplumber.open(BytesIO(result['pdf'])) as pdf:
+            chars=pdf.pages[0].chars
+            start=next(i for i,c in enumerate(chars) if c['text']=='彭')
+            row=chars[start:start+19];x=row[0]['x0']
+            # Sample glyph positions, not just the selected font or size:
+            # the old optimized punctuation put these at 34.2 / 70.9 / 124.5 bp.
+            for index,expected in [(4,31.499),(11,67.499),(18,121.516)]:
+                self.assertAlmostEqual(row[index]['x0']-x,expected,delta=.4)
+
+    def test_line_composition_matches_reviewed_english_breaks_in_real_pdf(self):
+        from font_inventory import probe_fonts
+        if not probe_fonts()['profiles']['annotations']['founder-sample']['available']:
+            self.skipTest('Licensed sample fonts are not installed')
+        source=self.source();source['layout'].update(inner=20,outer=20)
+        source['journal']['annotations'].update(fontSet='founder-sample',referenceGapMm=7.4)
+        source['blocks']=source['blocks'][:3]+[{'id':'r1','type':'paragraph','role':'reference','text':'[1] Lee W J, Li C E, Prajitno H, et al. Recent trend in thermal catalytic low temperature CO2 methanation: a critical review[J]. Catalysis Today, 2021, 368: 2-19.'}]
+        original=deepcopy(source);result=render_pdf(source)
+        self.assertEqual(source,original);self.assertEqual(result['compileMessages'],[])
+        with pdfplumber.open(BytesIO(result['pdf'])) as pdf:
+            lines=[l['text'].replace(' ','') for p in pdf.pages for l in p.crop((0,0,p.width/2,p.height)).extract_text_lines()]
+            self.assertTrue(any('LeeWJ' in l and l.endswith('ther-') for l in lines),lines)
+            self.assertTrue(any(l.startswith('malcatalytic') and l.endswith('criti-') for l in lines),lines)
+            self.assertTrue(any(l.startswith('calreview［J］.') for l in lines),lines)
 
 if __name__=='__main__':unittest.main()

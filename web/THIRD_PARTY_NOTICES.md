@@ -8,6 +8,8 @@ MathType MTEF 解析使用 mathtype2omml 的 mathtypejx/mtef 子模块，来源 
 
 REA 仅用于本地研究，不是应用依赖，不随本源码包分发。
 
+英文参考文献逐行断词读取 TeX Live 分发的 Plain TeX `hyphen.tex`，原文件及允许原样复制、分发的许可头保留在 `journal-engine/vendor/hyphen.tex`。本项目不修改该表，独立实现模式匹配和逐行填充；学术词汇的显式断词例外保存在 Python 代码中。字宽使用部署机器已有的 Pillow 和授权 Times New Roman 字体测量，不分发商业字体。
+
 网站 HTTP MCP 是独立的 JSON-RPC 实现，schema 使用 zod/v4（MIT）；准确包版本及所有传递依赖锁定于 package-lock.json。测试 fixtures 中 test-only.ttf / .otf 是由 tests/make-test-font.py 生成的原创几何字形（CC0），不是供实际阅读使用的字体。
 
 PDML XML 检查使用 @xmldom/xmldom 0.9.12（MIT），来源 https://github.com/xmldom/xmldom ，版本锁定于 package-lock.json。仅使用独立编写的检查代码；厂商安装包、模板、图像、字体及二进制分析产物均不随本项目分发。

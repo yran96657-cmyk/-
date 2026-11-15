@@ -1,4 +1,5 @@
 import {legacySource,vectorSource} from './asset-sources.mjs';
+import {validatedReferenceBreaks} from './reference-breaks.mjs';
 export const journalRoles=['title-zh','authors-zh','affiliation-zh','abstract-zh','keywords-zh','classification','title-en','authors-en','affiliation-en','abstract-en','keywords-en','citation','article-note','reference','reference-heading'];
 export function validateJournal(raw,blocks,notes=[]){
   if(raw===undefined){if(blocks.some(b=>b.role&&b.role!=='reference'))throw Error('首面角色须启用期刊模板。');return undefined;}
@@ -47,6 +48,7 @@ export function validateJournal(raw,blocks,notes=[]){
 }
 export function journalBlockFields(b){
   const fields={};
+  const referenceBreaks=validatedReferenceBreaks(b);if(referenceBreaks)fields.referenceBreaks=referenceBreaks;
   if(b.journalStyle!==undefined){
     if(!b.journalStyle||typeof b.journalStyle!=='object'||Array.isArray(b.journalStyle))throw Error('组件期刊样式无效');
     fields.journalStyle={};
