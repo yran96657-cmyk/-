@@ -13,6 +13,15 @@ export function validateJournal(raw,blocks,notes=[]){
   if(raw.tableWidthPercent!==undefined){if(!Number.isFinite(raw.tableWidthPercent)||raw.tableWidthPercent<70||raw.tableWidthPercent>100)throw Error('表格版心比例无效。');config.tableWidthPercent=raw.tableWidthPercent;}
   if(raw.captionBold!==undefined){if(typeof raw.captionBold!=='boolean')throw Error('题注字重无效。');config.captionBold=raw.captionBold;}
   if(raw.headSepMm!==undefined){if(!Number.isFinite(raw.headSepMm)||raw.headSepMm<2||raw.headSepMm>12)throw Error('页眉间距无效。');config.headSepMm=raw.headSepMm;}
+  for(const [key,lo,hi] of [['headerFontSize',6,12],['headerLeading',7,18],['latinTrackingPercent',-2,10]])if(raw[key]!==undefined){if(!Number.isFinite(raw[key])||raw[key]<lo||raw[key]>hi)throw Error('页眉字号/行距无效。');config[key]=raw[key];}
+  if(raw.excludedParagraphs!==undefined){
+    if(!Array.isArray(raw.excludedParagraphs)||raw.excludedParagraphs.length>100)throw Error('成品排除记录无效。');
+    const seen=new Set();config.excludedParagraphs=raw.excludedParagraphs.map(e=>{
+      const b=blocks.find(b=>b.id===e?.blockId);
+      if(!b||b.type!=='paragraph'||b.role||b.inlineMath?.length||b.ruby?.length||/\[\^|\[cite:|\[ref:/.test(b.text)||e.sourceText!==b.text||typeof e.reason!=='string'||!e.reason.trim()||e.reason.length>1000||seen.has(b.id)||blocks.some(x=>x.anchor?.targetId===b.id||x.captionIds?.includes(b.id)||x.sideTextIds?.includes(b.id)))throw Error('成品排除须绑定未修改的独立正文段及处理原因，不能排除注释、公式或锚点。');
+      seen.add(b.id);return {blockId:b.id,sourceText:b.text,reason:e.reason};
+    });
+  }
   if(raw.yearSuffix!==undefined){if(typeof raw.yearSuffix!=='string'||raw.yearSuffix.length>5)throw Error('年份后缀无效。');config.yearSuffix=raw.yearSuffix;}
   if(raw.annotations!==undefined){
     if(!raw.annotations||typeof raw.annotations!=='object'||Array.isArray(raw.annotations))throw Error('注释引用样式无效。');
@@ -25,6 +34,24 @@ export function validateJournal(raw,blocks,notes=[]){
       config.annotations[key]=value;
     }
   }
+  if(raw.excludedImages!==undefined){
+    if(!Array.isArray(raw.excludedImages)||raw.excludedImages.length>20)throw Error('排除图像记录无效。');
+    const seen=new Set();config.excludedImages=raw.excludedImages.map(e=>{
+      const b=blocks.find(b=>b.id===e?.blockId);
+      if(!b||b.type!=='image'||b.text||b.anchor||b.captionIds?.length||b.sideTextIds?.length||b.vectorSource||e.sourceSrc!==b.src||typeof e.sourceSrc!=='string'||e.sourceSrc.length>100000||typeof e.reason!=='string'||!e.reason.trim()||e.reason.length>1000||seen.has(b.id)||blocks.some(x=>x.cellImages?.some(c=>c.imageId===b.id)))throw Error('只能排除原始数据绑定的小型独立装饰图像。');
+      seen.add(b.id);return {blockId:b.id,sourceSrc:b.src,reason:e.reason};
+    });
+  }
+  if(raw.paragraphJoins!==undefined){
+    if(!Array.isArray(raw.paragraphJoins)||raw.paragraphJoins.length>100)throw Error('连续段落记录无效。');
+    const excluded=new Set([...(config.excludedParagraphs||[]),...(config.excludedImages||[])].map(e=>e.blockId)),flow=blocks.filter(b=>!excluded.has(b.id)),used=new Set();
+    config.paragraphJoins=raw.paragraphJoins.map(g=>{
+      if(!Array.isArray(g?.blockIds)||g.blockIds.length<2||g.blockIds.length>32||!['',' '].includes(g.separator))throw Error('连续段落记录无效。');
+      const members=g.blockIds.map(id=>flow.find(b=>b.id===id)),indices=g.blockIds.map(id=>flow.findIndex(b=>b.id===id));
+      for(let i=0;i<members.length;i++){const b=members[i];if(!b||b.type!=='paragraph'||b.role==='reference'||b.role!==members[0].role||used.has(b.id)||i&&indices[i]!==indices[i-1]+1||blocks.some(x=>x.anchor?.targetId===b.id||x.captionIds?.includes(b.id)||x.sideTextIds?.includes(b.id)))throw Error('只允许连续、同角色且无锚点的正文段联排。');used.add(b.id);}
+      return {blockIds:[...g.blockIds],separator:g.separator};
+    });
+  }
   if(raw.roleStyles!==undefined){
     if(!raw.roleStyles||Array.isArray(raw.roleStyles)||typeof raw.roleStyles!=='object')throw Error('期刊角色样式无效。');
     config.roleStyles={};
@@ -33,8 +60,8 @@ export function validateJournal(raw,blocks,notes=[]){
       const value={};for(const [key,v] of Object.entries(style)){
         if(key==='bold'){if(typeof v!=='boolean')throw Error('角色字重无效。');}
         else if(key==='align'){if(!['left','center','right','justify'].includes(v))throw Error('角色对齐无效。');}
-        else if(key==='fontFamily'){if(!['serif','sans'].includes(v))throw Error('角色字体无效。');}
-        else {const bounds={fontSize:[6,24],leading:[7,36],spaceBefore:[0,36],spaceAfter:[0,24]}[key];if(!bounds||!Number.isFinite(v)||v<bounds[0]||v>bounds[1])throw Error('角色样式数值无效。');}
+        else if(key==='fontFamily'){if(!['serif','sans','kai','fangsong'].includes(v))throw Error('角色字体无效。');}
+        else {const bounds={cjkTrackingPt:[0,3],latinTrackingPercent:[-2,10],fontSize:[6,24],leading:[7,36],spaceBefore:[0,96],spaceAfter:[0,24],leftIndentMm:[0,60],rightIndentMm:[0,60],firstLineIndentPt:[0,72]}[key];if(!bounds||!Number.isFinite(v)||v<bounds[0]||v>bounds[1])throw Error('角色样式数值无效。');}
         value[key]=v;
       }
       config.roleStyles[role]=value;

@@ -16,6 +16,41 @@ ROLE_STYLE={
  'keywords-en':(6.9,11.6,'justify',False),'citation':(6.9,11.5,'left',False),
  'article-note':(6.9,8,'left',False),'reference':(6.94,8.5,'justify',False),'reference-heading':(11.8,16,'left',False)}
 
+def excluded_paragraphs(doc):
+    entries=(doc.get('journal') or {}).get('excludedParagraphs',[])
+    if not isinstance(entries,list) or len(entries)>100:raise ValueError('成品排除记录无效。')
+    blocks=doc.get('blocks',[]);by_id={b.get('id'):b for b in blocks};seen=set()
+    for e in entries:
+        if not isinstance(e,dict):raise ValueError('成品排除记录无效。')
+        b=by_id.get(e.get('blockId'));reason=e.get('reason')
+        if not b or b.get('type')!='paragraph' or b.get('role') or b.get('inlineMath') or b.get('ruby') or re.search(r'\[\^|\[cite:|\[ref:',b.get('text','')) or e.get('sourceText')!=b.get('text') or not isinstance(reason,str) or not reason.strip() or len(reason)>1000 or b['id'] in seen or any(x.get('anchor',{}).get('targetId')==b['id'] or b['id'] in x.get('captionIds',[])+x.get('sideTextIds',[]) for x in blocks):
+            raise ValueError('成品排除须绑定未修改的独立正文段及处理原因。')
+        seen.add(b['id'])
+    return entries
+
+def excluded_images(doc):
+    entries=(doc.get('journal') or {}).get('excludedImages',[]);blocks=doc.get('blocks',[]);by_id={b.get('id'):b for b in blocks};seen=set()
+    if not isinstance(entries,list) or len(entries)>20:raise ValueError('排除图像记录无效。')
+    for e in entries:
+        if not isinstance(e,dict):raise ValueError('排除图像记录无效。')
+        b=by_id.get(e.get('blockId'));src=e.get('sourceSrc');reason=e.get('reason')
+        if not b or b.get('type')!='image' or b.get('text') or b.get('anchor') or b.get('captionIds') or b.get('sideTextIds') or b.get('vectorSource') or not isinstance(src,str) or len(src)>100000 or src!=b.get('src') or not isinstance(reason,str) or not reason.strip() or len(reason)>1000 or b['id'] in seen or any(c.get('imageId')==b['id'] for x in blocks for c in x.get('cellImages',[])):raise ValueError('只能排除原始数据绑定的小型独立装饰图像。')
+        seen.add(b['id'])
+    return entries
+
+def join_paragraphs(blocks,doc):
+    groups=(doc.get('journal') or {}).get('paragraphJoins',[]);used=set();starts={}
+    if not isinstance(groups,list) or len(groups)>100:raise ValueError('连续段落记录无效。')
+    ids=[b.get('id') for b in blocks]
+    for group in groups:
+        selected=group.get('blockIds',[]);separator=group.get('separator')
+        if not isinstance(selected,list) or not 2<=len(selected)<=32 or separator not in ('',' '):raise ValueError('连续段落记录无效。')
+        if any(i not in ids for i in selected):raise ValueError('连续段落不存在。')
+        indices=[ids.index(i) for i in selected];members=[blocks[i] for i in indices]
+        if indices!=list(range(indices[0],indices[0]+len(indices))) or any(b.get('type')!='paragraph' or b.get('role')=='reference' or b.get('role')!=members[0].get('role') or b['id'] in used for b in members) or len(set(selected))!=len(selected) or any(x.get('anchor',{}).get('targetId') in selected or set(x.get('captionIds',[])+x.get('sideTextIds',[]))&set(selected) for x in doc.get('blocks',[])):raise ValueError('只允许连续、同角色且无锚点的正文段联排。')
+        used.update(selected);starts[selected[0]]={**members[0],'id':'join:'+members[0]['id'],'text':separator.join(b.get('text','') for b in members),'_joinedParts':members,'_joinSeparator':separator,'inlineMath':[m for b in members for m in b.get('inlineMath',[])]}
+    return [starts[b['id']] if b.get('id') in starts else b for b in blocks if b.get('id') not in used or b.get('id') in starts]
+
 def prepare_blocks(doc):
     blocks=doc.get('blocks',[]);by_id={b.get('id'):b for b in blocks};caption_ids=set();anchored=set()
     cell_ids=validate_cell_images(blocks)
@@ -33,14 +68,15 @@ def prepare_blocks(doc):
         if not target or target.get('type') not in ('paragraph','heading') or target.get('role') or target.get('id') in caption_ids:raise ValueError('锚点须指向普通正文/标题。')
         if a.get('position') not in ('before','after') or not isinstance(a.get('maxPageDistance'),int) or not 0<=a['maxPageDistance']<=3:raise ValueError('锚点约束无效。')
         (before if a['position']=='before' else after).setdefault(target['id'],[]).append(b);anchored.add(b['id'])
+    excluded={e['blockId'] for e in excluded_paragraphs(doc)+excluded_images(doc)}
     front=[];body=[]
     for b in blocks:
-        if b.get('id') in caption_ids or b.get('id') in anchored or b.get('id') in cell_ids:continue
+        if b.get('id') in excluded or b.get('id') in caption_ids or b.get('id') in anchored or b.get('id') in cell_ids:continue
         if b.get('role') in FRONT_ROLES:
             if not doc.get('journal'):raise ValueError('首面角色须启用期刊模板。')
             front.append(b)
         else:body.extend(before.get(b.get('id'),[])+[b]+after.get(b.get('id'),[]))
-    return front+body,by_id
+    return join_paragraphs(front+body,doc),by_id
 
 def validate_cell_images(blocks):
     by_id={b.get('id'):b for b in blocks};owned=set()
@@ -151,9 +187,10 @@ def relation_report(document,objects,logical_objects=None):
         for ident in b.get('captionIds',[]):
             caption=logical.get(ident,{});c=caption.get('start');p=obj.get('start')
             if not c or not p or c['page']!=p['page']:diagnostics.append({'code':'CAPTION_SEPARATED','severity':'error','message':'题注与图表起始页分离或未定位：'+ident,'blockId':b['id']})
-    expected=[b['id'] for b in document.get('blocks',[]) if b.get('id') and b.get('type') in ('paragraph','heading','image','table','equation')]
+    excluded=excluded_paragraphs(document)+excluded_images(document);excluded_ids={e['blockId'] for e in excluded}
+    expected=[b['id'] for b in document.get('blocks',[]) if b.get('id') and b['id'] not in excluded_ids and b.get('type') in ('paragraph','heading','image','table','equation')]
     expected += [b['id']+':'+m['id'] for b in document.get('blocks',[]) for m in b.get('inlineMath',[]) if b.get('id')]
     expected += ['note:'+n['id'] for n in document.get('notes',[]) if n.get('id')]
     missing=[ident for ident in expected if not all(edge in logical.get(ident,{}) for edge in ('start','end'))]
     if missing:diagnostics.append({'code':'SOURCE_OBJECT_NOT_LOCATED','severity':'error','message':'源对象未完整定位：'+str(len(missing))+' 个'})
-    return {'units':'pt','origin':'top-left','scope':'semantic start/end destinations, not ink or collision bounds','relationPageBasis':'logical pages before selection/imposition','sourceObjectCoverage':{'expected':len(expected),'mapped':len(expected)-len(missing),'missing':missing},'objects':objects,'relations':relations,'sideGroups':side_relations,'cellImages':cell_relations,'diagnostics':diagnostics}
+    return {'units':'pt','origin':'top-left','scope':'semantic start/end destinations, not ink or collision bounds','relationPageBasis':'logical pages before selection/imposition','excludedParagraphs':excluded_paragraphs(document),'excludedImages':[{'blockId':e['blockId'],'reason':e['reason']} for e in excluded_images(document)],'sourceObjectCoverage':{'expected':len(expected),'mapped':len(expected)-len(missing),'missing':missing},'objects':objects,'relations':relations,'sideGroups':side_relations,'cellImages':cell_relations,'diagnostics':diagnostics}

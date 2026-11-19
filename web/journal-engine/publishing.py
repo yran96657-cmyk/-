@@ -61,7 +61,7 @@ def number(value,default,lo,hi):
 
 def resolve_font_set(layout):
     value=layout.get('fontSet') or os.environ.get('SHUYE_FONTSET','windows')
-    if value not in ('windows','mac','fandol','source-han'): raise ValueError('PDF 字体方案必须为 windows / mac / fandol / source-han。')
+    if value not in ('windows','mac','fandol','source-han','founder-sample'): raise ValueError('PDF 字体方案必须为 windows / mac / fandol / source-han / founder-sample。')
     return value
 
 def compile_diagnostics(log):
@@ -192,7 +192,17 @@ def build_tex(doc,assets_dir,math_widths=None):
             start=m.end()
         out.append(text_escape(s[start:])); return ''.join(out)
     def styled(b,table_notes=None):
+        if b.get('_joinedParts'):
+            return escape(b['_joinSeparator']).join(marker(p['id'],'start')+styled(p,table_notes)+marker(p['id'],'end') for p in b['_joinedParts'])
         s=str(b.get('text','')); marks=b.get('marks',[])
+        if journal and b.get('role') in FRONT_ROLES:
+            # Leading Word padding is formatting, not an extra indent on top of
+            # the measured role inset. Rebase UTF-16 marks in this render copy.
+            trimmed=s.lstrip();removed=len(s[:len(s)-len(trimmed)].encode('utf-16-le'))//2
+            if removed:
+                s=trimmed
+                marks=[{**m,'start':max(0,m['start']-removed),'end':m['end']-removed} for m in marks if m['end']>removed]
+                b={**b,'ruby':[{**r,'start':max(0,r['start']-removed),'end':r['end']-removed} for r in b.get('ruby',[]) if r['end']>removed]}
         if journal and journal.get('normalizeTypography',True):marks=[{k:v for k,v in m.items() if k not in ('fontFamily','fontSize')} for m in marks];marks=[m for m in marks if len(m)>2]
         # UTF-16 boundaries matching JavaScript; never split surrogate pairs.
         offsets=[0]
@@ -222,6 +232,17 @@ def build_tex(doc,assets_dir,math_widths=None):
             if pos<len(s):chunks.append(segment(pos,len(s)))
             return ''.join(chunks)
         boundaries={0,len(s)}
+        # Template labels have their own face, independently of the body
+        # weight override. Word often stores these as only a font-family mark,
+        # which normalizeTypography deliberately discards for ordinary text.
+        labels=[]
+        if font_set=='founder-sample':
+            patterns={'abstract-zh':r'^摘\s*要\s*[:：]?', 'abstract-en':r'^Abstract\s*[:：]?',
+                      'keywords-zh':r'^关\s*键\s*词\s*[:：]?', 'keywords-en':r'^Key\s*words\s*[:：]?',
+                      'classification':r'(?:中国分类号|中图分类号|学科分类号|文献标识码|文章编号)\s*[:：]?'}
+            if b.get('role') in patterns:
+                labels=list(re.finditer(patterns[b['role']],s,re.I))
+                for label in labels:boundaries.update((label.start(),label.end()))
         reference_hints=dict(b.get('_referenceBreaks',[]))
         boundaries.update(reference_hints)
         citations=[]
@@ -241,6 +262,8 @@ def build_tex(doc,assets_dir,math_widths=None):
             style={}
             for x,y,m in converted:
                 if x<=a and z<=y: style.update(m)
+            is_label=any(m.start()<=a and z<=m.end() for m in labels)
+            if is_label:style['bold']=True
             t=plain(s[a:z],{m['id']:m['text'] for m in b.get('inlineMath',[])},table_notes,owner_id=b.get('id'),reference=b.get('role')=='reference')
             # Word formats footnote-reference runs as superscripts. The TeX
             # footnote already owns its marker; nesting its paragraph body in
@@ -251,14 +274,27 @@ def build_tex(doc,assets_dir,math_widths=None):
             if is_citation and annotations.get('fontSet')=='founder-sample':
                 t=re.sub(r'[\[\]［］]',lambda m:r'{\mdseries\upshape\ShuyeReferenceBracket '+('［' if m[0] in '[［' else '］')+'}',t)
                 t=r'{\ShuyeAnnotationLatin '+t+'}'
+            sample_script=font_set=='founder-sample' and (style.get('superscript') or style.get('subscript')) and not raised_citation
             for key,cmd in [('bold','textbf'),('italic','textit'),('underline','uline'),('superscript','textsuperscript'),('subscript','textsubscript')]:
-                if style.get(key) and not (key=='superscript' and raised_citation): t='\\'+cmd+'{'+t+'}'
+                if style.get(key) and not (key=='superscript' and raised_citation) and not (sample_script and key in ('superscript','subscript')): t='\\'+cmd+'{'+t+'}'
+            if sample_script:
+                # Match the journal's actual script face size, instead of TeX's
+                # generic 70% text scripts. The source code points/marks stay intact.
+                scale='.5525' if b.get('role') in ('abstract-zh','abstract-en','keywords-zh','keywords-en','citation') else '.53'
+                command='ShuyeSampleSup' if style.get('superscript') else 'ShuyeSampleSub'
+                t='\\'+command+'{'+scale+'}{'+t+'}'
             if raised_citation:
                 citation_size=number(annotations['citationSuperscriptSize'],5.47,4,12)
+                if b.get('role') in FRONT_ROLES:
+                    role_size=number({**journal.get('roleStyles',{}).get(b['role'],{}),**b.get('journalStyle',{})}.get('fontSize'),ROLE_STYLE[b['role']][0],5,72)
+                    citation_size=min(citation_size,role_size*.5525)
                 rise=number(annotations.get('citationRisePt'),4.215,0,8)
                 t=r'\raisebox{'+str(rise)+r'pt}{\fontsize{'+str(citation_size)+'}{'+str(citation_size)+r'}\selectfont '+t+'}'
             if is_citation and not style.get('superscript') and not style.get('subscript') and 'citationInlineSize' in annotations:
                 citation_size=number(annotations['citationInlineSize'],10.33,5,24)
+                if b.get('role') in FRONT_ROLES:
+                    role_size=number({**journal.get('roleStyles',{}).get(b['role'],{}),**b.get('journalStyle',{})}.get('fontSize'),ROLE_STYLE[b['role']][0],5,72)
+                    citation_size=min(citation_size,role_size)
                 t=r'{\fontsize{'+str(citation_size)+'}{'+str(citation_size*1.2)+r'}\selectfont '+t+'}'
             if style.get('bold') is False: t=r'\textmd{'+t+'}'
             if style.get('italic') is False: t=r'\textup{'+t+'}'
@@ -266,6 +302,7 @@ def build_tex(doc,assets_dir,math_widths=None):
             if style.get('fontFamily') in ('serif','sans','kai'): t='{'+{'serif':r'\rmfamily ','sans':r'\sffamily ','kai':r'\kaifamily '}[style['fontFamily']]+t+'}'
             if 'fontSize' in style:
                 size=number(style['fontSize'],11,5,72); t=r'{\fontsize{'+str(size)+'}{'+str(size*1.3)+r'}\selectfont '+t+'}'
+            if is_label:t=r'{\sffamily\bfseries '+t+'}'
             result.append(t)
             if z in reference_hints:
                 result.append((r'\mbox{-}' if reference_hints[z] else r'\unskip')+r'\linebreak{}')
@@ -299,20 +336,31 @@ def build_tex(doc,assets_dir,math_widths=None):
 \newcommand{\ShuyeArticleNote}{\long\def\@makefntext##1{##1}}
 \newcommand{\ShuyeHideNoteMark}{\def\@makefnmark{}}
 \newcommand{\ShuyeAfterParagraph}{\if@nobreak\@nobreakfalse\everypar{}\fi}
+\newcommand{\ShuyeSampleSup}[2]{\raisebox{.48em}{\fontsize{#1\dimexpr\f@size pt\relax}{#1\dimexpr\f@size pt\relax}\selectfont #2}}
+\newcommand{\ShuyeSampleSub}[2]{\raisebox{-.22em}{\fontsize{#1\dimexpr\f@size pt\relax}{#1\dimexpr\f@size pt\relax}\selectfont #2}}
 \makeatother
 % fancyhdr is activated after geometry so it uses the actual paper width.
 \renewcommand{\headrulewidth}{0.3pt}
 \setlength{\headheight}{18pt}
 '''
+    if journal and 'headerLeading' in journal:pre+=r'\setlength{\headheight}{'+str(2*number(journal['headerLeading'],8.5,7,18))+'pt}\n'
     if journal and 'headSepMm' in journal:pre+=r'\setlength{\headsep}{'+str(number(journal['headSepMm'],3,2,12))+'mm}\n'
     pre+=r'\geometry{paperwidth='+str(values['width'])+'mm,paperheight='+str(values['height'])+'mm,top='+str(values['top'])+'mm,bottom='+str(values['bottom'])+'mm,inner='+str(values['inner'])+'mm,outer='+str(values['outer'])+'mm}\n'
-    pre=pre.replace('SHUYEFONTSET','none' if font_set=='source-han' else font_set).replace('SHUYEKAI',{'windows':'KaiTi','mac':'Kaiti SC','fandol':'FandolKai-Regular.otf','source-han':'FandolKai-Regular.otf'}[font_set])
+    pre=pre.replace('SHUYEFONTSET','none' if font_set in ('source-han','founder-sample') else font_set).replace('SHUYEKAI',{'windows':'KaiTi','mac':'Kaiti SC','fandol':'FandolKai-Regular.otf','source-han':'FandolKai-Regular.otf','founder-sample':'FZKai-Z03'}[font_set])
     if journal and journal.get('bodyWeight','regular') not in ('regular','light'):raise ValueError('正文字重无效。')
     if journal and journal.get('bodyWeight')=='light' and font_set!='source-han':raise ValueError('轻字重正文须使用思源字体方案。')
     if font_set=='source-han':pre+=r'\setCJKmainfont[BoldFont={Source Han Serif SC Bold}]{Source Han Serif SC}\setCJKsansfont[BoldFont={Source Han Sans SC Bold}]{Source Han Sans SC}'+'\n'
     if journal and journal.get('bodyWeight')=='light':pre=pre.replace(']{Source Han Serif SC}',']{Source Han Serif SC Light}')
+    if font_set=='founder-sample':pre+=r'\setCJKmainfont[BoldFont={FZHei-B01},ItalicFont={FZKai-Z03}]{FZShuSong-Z01}\setCJKsansfont[BoldFont={FZHei-B01}]{FZHei-B01}\setCJKmonofont{FZFangSong-Z02}'+'\n'
+    pre+=r'\newCJKfontfamily\fangsongfamily'+('[BoldFont={FZHei-B01}]' if font_set=='founder-sample' else '')+'{'+('FZFangSong-Z02' if font_set=='founder-sample' else 'FangSong' if font_set=='windows' else 'FandolFang-Regular.otf')+'}\n'
     if journal:pre+=annotation_preamble(journal)
-    if journal and journal.get('latinFont')=='times':pre+=r'\setmainfont{Times New Roman}'+'\n'
+    if journal and journal.get('latinFont')=='times':
+        tracking='[LetterSpace='+str(number(journal['latinTrackingPercent'],0,-2,10))+']' if 'latinTrackingPercent' in journal else ''
+        pre+=r'\setmainfont'+tracking+r'{Times New Roman}\setsansfont'+tracking+'{Times New Roman}\n'
+    # Tracked Latin runs need elastic boundary spacing when a justified CJK
+    # line contains chemical names or inline scripts; fixed boundary kerns
+    # can protrude even when ordinary CJK spacing has sufficient stretch.
+    if font_set=='founder-sample':pre+=r'\xeCJKsetup{CJKglue={\hskip .020408em plus .1em minus .02em},CJKecglue={\hskip .020408em plus .05em minus .02em},PunctStyle=kaiming}'+'\n'
     # Fandol lacks some traditional Chinese characters. Prefer installed open
     # fonts as fallbacks; never replace the source character with a lookalike.
     fallback_dir=os.environ.get('SHUYE_NOTO_FONT_DIR')
@@ -344,7 +392,11 @@ def build_tex(doc,assets_dir,math_widths=None):
         rule_width=str(number(annotations['noteRuleWidthMm'],0,0,100))+'mm' if 'noteRuleWidthMm' in annotations else '81pt'
         rule_weight=number(annotations.get('noteRuleThicknessPt'),.3,.1,2)
         rule_after=number(annotations.get('noteRuleAfterPt'),3-rule_weight,0,20)
-        pre+=r'\setlength{\parskip}{0pt}\setlength{\skip\footins}{5pt}\renewcommand{\footnoterule}{\kern-3pt\hrule width'+rule_width+' height'+str(rule_weight)+'pt'+r'\kern'+str(rule_after)+'pt}'+'\n'
+        # TeX's output routine requires footnoterule to have zero net height.
+        # A custom after-rule gap without the matching negative kern makes
+        # multicol overflow every first page containing article notes.
+        rule_height=rule_weight+rule_after
+        pre+=r'\setlength{\parskip}{0pt}\setlength{\skip\footins}{'+str(max(5,rule_height+3))+r'pt}\renewcommand{\footnoterule}{\kern-'+str(rule_height)+r'pt\hrule width'+rule_width+' height'+str(rule_weight)+'pt'+r'\kern'+str(rule_after)+'pt}'+'\n'
         pre+=r'\makeatletter\renewcommand\footnotesize{\@setfontsize\footnotesize{6.9pt}{8pt}}\makeatother'+'\n'
     if any(b.get('floatPlacement')=='top' for b in blocks):
         pre+=r'\renewcommand{\dbltopfraction}{.9}\renewcommand{\textfraction}{.05}\makeatletter\setlength{\@fptop}{0pt}\setlength{\@dblfptop}{0pt}\makeatother'+'\n'
@@ -355,8 +407,9 @@ def build_tex(doc,assets_dir,math_widths=None):
     pre+=r'\fancyfoot[LE]{'+footer(layout.get('footerEven',layout.get('footer','{page}')))+r'}\fancyfoot[RO]{'+footer(layout.get('footer','{page}'))+'}\n'
     if journal:
         name=escape(journal.get('name',''));name_en=escape(journal.get('nameEn',''))
+        if font_set=='founder-sample':name=r'{\kaifamily '+name+'}'
         volume,issue,year=(escape(journal.get(k,'')) for k in ('volume','issue','year'))
-        small=r'\fontsize{6.9}{8.5}\selectfont '
+        small=r'\fontsize{'+str(number(journal.get('headerFontSize'),6.9,6,12))+'}{'+str(number(journal.get('headerLeading'),8.5,7,18))+r'}\selectfont '
         page_label=r'\thepage' if journal.get('pageNumberStyle','plain')=='plain' else r'·\enspace\thepage\enspace·'
         year+=escape(journal.get('yearSuffix',''))
         pre+=r'\fancyhf{}\fancyhead[LE]{'+small+page_label+r'}\fancyhead[CE]{'+small+name+r'}\fancyhead[RE]{'+small+year+r'}\fancyhead[LO]{'+small+('第'+issue+'期' if issue else '')+r'}\fancyhead[CO]{'+small+escape(journal.get('shortTitle',''))+r'}\fancyhead[RO]{'+small+page_label+r'}'+'\n'
@@ -521,17 +574,22 @@ def build_tex(doc,assets_dir,math_widths=None):
                     if not isinstance(custom['bold'],bool):raise ValueError('角色字重无效。')
                     bold=custom['bold'];render_source={**b,'marks':[{k:v for k,v in m.items() if k!='bold'} for m in b.get('marks',[])]}
                 family=custom.get('fontFamily','serif')
-                if family not in ('serif','sans','kai'):raise ValueError('角色字体无效。')
-                family_cmd=r'\sffamily ' if family=='sans' else r'\kaifamily ' if family=='kai' else ''
+                if family not in ('serif','sans','kai','fangsong'):raise ValueError('角色字体无效。')
+                family_cmd=r'\sffamily ' if family=='sans' else r'\kaifamily ' if family=='kai' else r'\fangsongfamily ' if family=='fangsong' else ''
                 if annotations.get('fontSet')=='founder-sample' and role in ('reference','reference-heading','citation','article-note'):
                     family_cmd=r'\ShuyeAnnotationFont '+(r'\ShuyeAnnotationLabel ' if role=='reference-heading' else '')
                 spacing_cmd=r'\ShuyeReferenceSpacing ' if annotations.get('fontSet')=='founder-sample' and role=='reference' else ''
+                if 'cjkTrackingPt' in custom:spacing_cmd+=r'\xeCJKsetup{CJKglue={\hskip '+str(number(custom['cjkTrackingPt'],0,0,3))+r'pt plus .1em minus .02em}}'
+                if 'latinTrackingPercent' in custom:spacing_cmd+=r'\addfontfeatures{LetterSpace='+str(number(custom['latinTrackingPercent'],0,-2,10))+'}'
                 align_cmd={'center':r'\centering ','left':r'\raggedright ','right':r'\raggedleft ','justify':''}[alignment]
                 indent=r'\setlength{\parindent}{13.8pt}' if role in ('abstract-zh','keywords-zh','abstract-en','keywords-en') else r'\setlength{\parindent}{0pt}'
                 if role in ('abstract-zh','keywords-zh'):indent+=r'\leftskip=16pt '
-                before=number(custom.get('spaceBefore'),4 if role.startswith('title') else 0,0,36)
+                if 'leftIndentMm' in custom:indent+=r'\leftskip='+str(number(custom['leftIndentMm'],0,0,60))+'mm'+(' plus 1fil' if alignment in ('center','right') else '')+' '
+                if 'rightIndentMm' in custom:indent+=r'\rightskip='+str(number(custom['rightIndentMm'],0,0,60))+'mm'+(' plus 1fil' if alignment in ('center','left') else '')+' '
+                if 'firstLineIndentPt' in custom:indent+=r'\setlength{\parindent}{'+str(number(custom['firstLineIndentPt'],0,0,72))+'pt}'
+                before=number(custom.get('spaceBefore'),4 if role.startswith('title') else 0,0,96)
                 after=number(custom.get('spaceAfter'),0,0,24)
-                gap=r'\addvspace{'+str(before)+'pt}' if before else ''
+                gap=(r'\vspace*{' if block_num==0 else r'\addvspace{')+str(before)+'pt}' if before else ''
                 if role=='reference':
                     hanging=str(number(annotations.get('referenceIndentMm'),7,0,20))+'mm'
                     indent=r'\setlength{\parindent}{0pt}\hangindent='+hanging+r'\hangafter=1 '
@@ -555,7 +613,7 @@ def build_tex(doc,assets_dir,math_widths=None):
                 if not text:text=styled(render_source)
                 if role=='reference-heading':
                     gap=(r'\Needspace{'+str(leading+2*number(journal.get('roleStyles',{}).get('reference',{}).get('leading'),14,7,36))+r'pt}' if not incols else '')+gap
-                if role=='classification':text=re.sub(r' {2,}',lambda _:r'\hspace{6em}',text)
+                if role=='classification':text=re.sub(r' {2,}',lambda _:r'\hspace{2em}',text.lstrip())
                 content.append(r'\par'+gap+'{'+align_cmd+family_cmd+indent+r'\fontsize{'+str(size)+'}{'+str(leading)+r'}\selectfont '+spacing_cmd+(r'\bfseries ' if bold else '')+r'\leavevmode '+block_labels+text+marker(b.get('id'),'end')+r'\par}\ShuyeAfterParagraph'+(r'\nobreak' if role=='reference-heading' else '')+(r'\addvspace{'+str(after)+'pt}' if after else '')+(r'\nobreak' if role=='reference-heading' else ''))
                 continue
             text=styled(b)

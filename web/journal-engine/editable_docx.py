@@ -192,7 +192,9 @@ class Writer:
             p.alignment={'center':WD_ALIGN_PARAGRAPH.CENTER,'right':WD_ALIGN_PARAGRAPH.RIGHT,'left':WD_ALIGN_PARAGRAPH.LEFT,'justify':WD_ALIGN_PARAGRAPH.JUSTIFY}.get(align,WD_ALIGN_PARAGRAPH.JUSTIFY)
             if typ=='heading':p.style='Heading '+str(min(4,b.get('level',1)));p.paragraph_format.keep_with_next=True;p.paragraph_format.space_before=Pt(7)
             if typ in ('paragraph','heading'):
-                self.inline(p,b.get('text',''),b);self.counts['textBlocks']+=1
+                for i,part in enumerate(b.get('_joinedParts',[b])):
+                    if i:p.add_run(b['_joinSeparator'])
+                    self.inline(p,part.get('text',''),part);self.counts['textBlocks']+=1
                 if not role and typ=='paragraph':p.paragraph_format.first_line_indent=Pt(b.get('indentPt',b.get('indent',0)*self.size))
             elif typ=='equation':
                 self.formula(p,b);p.alignment=WD_ALIGN_PARAGRAPH.CENTER

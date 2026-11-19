@@ -8,6 +8,7 @@ import tempfile
 
 PROFILES = {
     'cjk': {
+        'founder-sample': ['FZShuSong-Z01', 'FZHei-B01', 'FZKai-Z03', 'FZFangSong-Z02'],
         'fandol': ['FandolSong-Regular.otf', 'FandolSong-Bold.otf', 'FandolHei-Regular.otf', 'FandolHei-Bold.otf', 'FandolKai-Regular.otf', 'FandolFang-Regular.otf'],
         'source-han': ['Source Han Serif SC', 'Source Han Serif SC Bold', 'Source Han Sans SC', 'Source Han Sans SC Bold', 'FandolKai-Regular.otf'],
         'windows': ['SimSun', 'SimHei', 'KaiTi', 'FangSong', 'Microsoft YaHei', 'Microsoft YaHei Bold', 'LiSu', 'YouYuan'],

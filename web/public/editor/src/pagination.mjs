@@ -4,7 +4,7 @@ import { buildTableElement, cellDisplayMarks, tableRowGroups, headerRowCount } f
 import { buildRuby } from './ruby.mjs';
 import {journalPreviewStyle,journalFrontMatter} from './journal-preview.mjs';
 const MM = 96 / 25.4;
-export const families = {'annotation':'"Times New Roman","FZShuSong-Z01",serif','annotation-label':'"Times New Roman","FZHei-B01",sans-serif',serif:'SimSun,"Songti SC",serif',sans:'"Microsoft YaHei",sans-serif',kai:'KaiTi,STKaiti,serif'};
+export const families = {'annotation':'"Times New Roman","FZShuSong-Z01",serif','annotation-label':'"Times New Roman","FZHei-B01",sans-serif',serif:'SimSun,"Songti SC",serif',sans:'"Microsoft YaHei",sans-serif',kai:'KaiTi,STKaiti,serif',fangsong:'"FZFangSong-Z02",FangSong,serif'};
 const refs = text => [...text.matchAll(/\[\^([-\w]+)\]/g)].map(m=>m[1]);
 export function styleBlock(el,b,l,continued=false) {
   el.className=`block ${b.type}${continued?' fragment':''}`;
@@ -17,6 +17,12 @@ export function styleBlock(el,b,l,continued=false) {
   el.style.setProperty('--image-max',`${(l.height-l.top-l.bottom)*MM-60}px`);
   const role=journalPreviewStyle(b,l._journal);
   if(role){Object.assign(el.style,role,{fontFamily:families[role.fontFamily]});if(continued){el.style.textIndent='0';el.style.paddingTop='0';}}
+  if(l.fontSet==='founder-sample'){
+    const family=role?.fontFamily||b.fontFamily||'serif';
+    el.style.fontFamily={serif:families.annotation,sans:families['annotation-label'],kai:'"Times New Roman","FZKai-Z03",KaiTi,serif',fangsong:families.fangsong}[family]||families[family];
+  }
+  const excluded=l._journal?.excludedParagraphs?.find(e=>e.blockId===b.id&&e.sourceText===b.text)||l._journal?.excludedImages?.find(e=>e.blockId===b.id&&e.sourceSrc===b.src);
+  if(excluded){el.dataset.printExcluded='true';el.title=`成品不印（保留原文）：${excluded.reason}`;el.style.opacity='.5';el.style.textDecoration='line-through';}
 }
 function applyMark(span,m) {
   if(m.bold!==undefined)span.style.fontWeight=m.bold?'700':'400';

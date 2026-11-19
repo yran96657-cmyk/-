@@ -13,7 +13,7 @@ export async function handle(request,env,mcp=false){
       if(input?.jsonrpc!=='2.0'||typeof input.method!=='string'||(input.id!==undefined&&typeof input.id!=='string'&&typeof input.id!=='number'&&input.id!==null))return json({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Invalid Request'}},400);
       const success=result=>json({jsonrpc:'2.0',id:input.id??null,result});
       if(input.method==='server/discover')return success({supportedVersions:['2026-07-28'],capabilities:{tools:{}}});
-      if(input.method==='initialize')return success({protocolVersion:input.params?.protocolVersion==='2026-07-28'?'2026-07-28':'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'shuye-cloud',version:'0.8.2'}});
+      if(input.method==='initialize')return success({protocolVersion:input.params?.protocolVersion==='2026-07-28'?'2026-07-28':'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'shuye-cloud',version:'0.8.3'}});
       if(input.method.startsWith('notifications/'))return new Response(null,{status:202});
       if(input.method==='ping')return success({});
       if(input.method==='tools/list')return success({tools:toolList()});

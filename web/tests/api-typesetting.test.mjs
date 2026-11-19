@@ -49,6 +49,16 @@ test('uncertain writes are recoverable only when revision and entire source dige
  }
 });
 async function fixture(t){const dir=await mkdtemp(join(tmpdir(),'shuye-api-')),storage=await openStorage(join(dir,'data')),store=new CloudStore(storage.DB,storage.BUCKET,'alice');await store.create('paper',makeTemplate('journal','Title'));t.after(async()=>{storage.close();await rm(dir,{recursive:true,force:true});});return {dir,store,storage};}
+test('MCP measured typography and source-bound print exclusions preview and persist without deleting source',async t=>{
+ const {store}=await fixture(t),original=await store.get('paper');
+ const b=original.document.blocks.find(b=>b.type==='paragraph'&&!b.role&&!b.inlineMath?.length&&!b.ruby?.length&&!/\[/.test(b.text));assert.ok(b);
+ const args={projectId:'paper',expectedRevision:1,layout:{height:297,fontSet:'founder-sample'},journal:{headerFontSize:8.85,headerLeading:12,excludedParagraphs:[{blockId:b.id,sourceText:b.text,reason:'作者确认模板残留'}],roleStyles:{'abstract-zh':{fontFamily:'fangsong',leftIndentMm:7.4,firstLineIndentPt:18},'authors-zh':{fontFamily:'kai'}}}};
+ const preview=await callTool(store,'apply_typesetting',{...args,dryRun:true});assert.equal((await store.get('paper')).revision,1);
+ await callTool(store,'apply_typesetting',{...args,previewHash:preview.previewHash});
+ const after=await store.get('paper');assert.deepEqual(after.document.blocks,original.document.blocks);assert.equal(after.document.journal.excludedParagraphs[0].sourceText,b.text);
+ assert.equal(after.document.journal.roleStyles['abstract-zh'].leftIndentMm,7.4);
+ const context=await callTool(store,'get_typesetting_context',{projectId:'paper'});assert.deepEqual(context.journal.excludedParagraphs,after.document.journal.excludedParagraphs);
+});
 test('annotation configuration survives MCP preview, commit, reload and partial merge',async t=>{
  const {store}=await fixture(t);
  const args={projectId:'paper',expectedRevision:1,journal:{annotations:{referenceColumns:2,noteIndentMm:6.13,referenceLabelStyle:'fullwidth'},roleStyles:{'article-note':{fontSize:8.853075,leading:10.302991875},'reference-heading':{fontSize:11.8041}}}};

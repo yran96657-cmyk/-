@@ -71,7 +71,7 @@ export function validateDocument(raw) {
   if(raw.layout?.writingMode!==undefined&&!['horizontal-tb','vertical-rl'].includes(raw.layout.writingMode))throw Error('文字方向无效。');
   layout.writingMode = raw.layout?.writingMode || 'horizontal-tb';
   layout.widowLines = [1,2,3].includes(raw.layout?.widowLines) ? raw.layout.widowLines : 2;
-  if(raw.layout?.fontSet!==undefined&&!['windows','mac','fandol','source-han'].includes(raw.layout.fontSet))throw Error('PDF 字体方案无效。');
+  if(raw.layout?.fontSet!==undefined&&!['windows','mac','fandol','source-han','founder-sample'].includes(raw.layout.fontSet))throw Error('PDF 字体方案无效。');
   if(raw.layout?.fontSet)layout.fontSet=raw.layout.fontSet;
   const seen = new Set();
   const blocks = raw.blocks.map((b) => {
