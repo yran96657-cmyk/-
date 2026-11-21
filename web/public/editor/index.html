@@ -1,8 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="shuye-desktop">
   <head>
     <link rel="icon" type="image/svg+xml" href="../favicon.svg">
     <meta charset="utf-8" />
+    <meta name="color-scheme" content="dark" />
+    <style media="screen">html.shuye-desktop{color-scheme:dark;background:#232323}</style>
     <link rel="stylesheet" href="./composition.css" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>书页 · 在线排版工作台</title>
@@ -13,7 +15,12 @@
     <link rel="stylesheet" href="proofmark-review.css" />
     <link rel="stylesheet" href="ruby.css" /><link rel="stylesheet" href="web.css" />
   </head>
-  <body>
+  <body class="workbench" data-starting>
+    <div id="workbenchStartup" class="workbench-startup" role="status">
+      <p class="startup-message">正在打开文稿…</p>
+      <nav hidden><a href="">重新加载</a><a href="../">返回项目库</a></nav>
+      <noscript><style>.startup-message{display:none}</style>需要启用 JavaScript 才能打开工作区。<a href="../">返回项目库</a></noscript>
+    </div>
     <header class="topbar">
       <a class="back-library" href="/" title="返回项目库">← 项目库</a><div class="brand">
         <svg viewBox="0 0 48 48" width="28" height="28" aria-hidden="true" focusable="false"><use href="../brand/shuye-mark.svg#mark"/></svg>
@@ -277,6 +284,6 @@
       </p>
       <button id="closeHelp" class="primary">开始排版</button>
     </dialog>
-    <script src="vendor/katex/katex.min.js"></script><script type="module" src="src/app.mjs"></script>
+    <script src="vendor/katex/katex.min.js"></script><script type="module" src="src/startup.mjs"></script>
   </body>
 </html>
